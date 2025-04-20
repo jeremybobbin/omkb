@@ -1,9 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2021 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -24,133 +18,25 @@
 // HID consumer control input report length
 #define HID_CC_IN_RPT_LEN           2
 
-esp_err_t esp_hidd_register_callbacks(esp_hidd_event_cb_t callbacks)
-{
-	esp_err_t hidd_status;
+#define PROFILE_NUM            1
+#define PROFILE_APP_IDX        0
 
-	if (callbacks != NULL) {
-		hidd_le_env.hidd_cb = callbacks;
-	} else {
-		return ESP_FAIL;
-	}
+#define HI_UINT16(a) (((a) >> 8) & 0xFF)
+#define LO_UINT16(a) ((a) & 0xFF)
+#define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
 
-	if ((hidd_status = hidd_register_cb()) != ESP_OK) {
-		return hidd_status;
-	}
+/// Battery Service Attributes Indexes
+enum {
+	BAS_IDX_SVC,
 
-	esp_ble_gatts_app_register(BATTRAY_APP_ID);
+	BAS_IDX_BATT_LVL_CHAR,
+	BAS_IDX_BATT_LVL_VAL,
+	BAS_IDX_BATT_LVL_NTF_CFG,
+	BAS_IDX_BATT_LVL_PRES_FMT,
 
-	if ((hidd_status = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK) {
-		return hidd_status;
-	}
+	BAS_IDX_NB,
+};
 
-	return hidd_status;
-}
-
-esp_err_t esp_hidd_profile_init(void)
-{
-	if (hidd_le_env.enabled) {
-		ESP_LOGE(HID_LE_PRF_TAG,
-			 "HID device profile already initialized");
-		return ESP_FAIL;
-	}
-	// Reset the hid device target environment
-	memset(&hidd_le_env, 0, sizeof(hidd_le_env_t));
-	hidd_le_env.enabled = true;
-	return ESP_OK;
-}
-
-esp_err_t esp_hidd_profile_deinit(void)
-{
-	uint16_t hidd_svc_hdl = hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC];
-	if (!hidd_le_env.enabled) {
-		ESP_LOGE(HID_LE_PRF_TAG,
-			 "HID device profile already initialized");
-		return ESP_OK;
-	}
-
-	if (hidd_svc_hdl != 0) {
-		esp_ble_gatts_stop_service(hidd_svc_hdl);
-		esp_ble_gatts_delete_service(hidd_svc_hdl);
-	} else {
-		return ESP_FAIL;
-	}
-
-	/* register the HID device profile to the BTA_GATTS module */
-	esp_ble_gatts_app_unregister(hidd_le_env.gatt_if);
-
-	return ESP_OK;
-}
-
-uint16_t esp_hidd_get_version(void)
-{
-	return HIDD_VERSION;
-}
-
-void esp_hidd_send_consumer_value(uint16_t conn_id, uint8_t key_cmd,
-				  bool key_pressed)
-{
-	uint8_t buffer[HID_CC_IN_RPT_LEN] = { 0, 0 };
-	if (key_pressed) {
-		ESP_LOGD(HID_LE_PRF_TAG, "hid_consumer_build_report");
-		hid_consumer_build_report(buffer, key_cmd);
-	}
-	ESP_LOGD(HID_LE_PRF_TAG, "buffer[0] = %x, buffer[1] = %x", buffer[0],
-		 buffer[1]);
-	hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_CC_IN,
-			    HID_REPORT_TYPE_INPUT, HID_CC_IN_RPT_LEN, buffer);
-	return;
-}
-
-int esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask,
-				  uint8_t *keyboard_cmd, uint8_t num_key)
-{
-	if (num_key > HID_KEYBOARD_IN_RPT_LEN - 2) {
-		ESP_LOGE(HID_LE_PRF_TAG,
-			 "%s(), the number key should not be more than %d",
-			 __func__, HID_KEYBOARD_IN_RPT_LEN);
-		return 1;
-	}
-
-	uint8_t buffer[HID_KEYBOARD_IN_RPT_LEN] = { 0 };
-
-	buffer[0] = special_key_mask;
-
-	for (int i = 0; i < num_key; i++) {
-		buffer[i + 2] = keyboard_cmd[i];
-	}
-
-	ESP_LOGD(HID_LE_PRF_TAG, "the key vaule = %d,%d,%d, %d, %d, %d,%d, %d",
-		 buffer[0], buffer[1], buffer[2], buffer[3], buffer[4],
-		 buffer[5], buffer[6], buffer[7]);
-	return hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_KEY_IN,
-			    HID_REPORT_TYPE_INPUT, HID_KEYBOARD_IN_RPT_LEN,
-			    buffer);
-}
-
-void esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button,
-			       int8_t mickeys_x, int8_t mickeys_y)
-{
-	uint8_t buffer[HID_MOUSE_IN_RPT_LEN];
-
-	buffer[0] = mouse_button;	// Buttons
-	buffer[1] = mickeys_x;	// X
-	buffer[2] = mickeys_y;	// Y
-	buffer[3] = 0;		// Wheel
-	buffer[4] = 0;		// AC Pan
-
-	hid_dev_send_report(hidd_le_env.gatt_if, conn_id,
-			    HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT,
-			    HID_MOUSE_IN_RPT_LEN, buffer);
-	return;
-}
-/*
- * SPDX-FileCopyrightText: 2021-2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-
-/// characteristic presentation information
 struct prf_char_pres_fmt {
 	/// Unit (The Unit is a UUID)
 	uint16_t unit;
@@ -166,6 +52,8 @@ struct prf_char_pres_fmt {
 
 // HID report mapping table
 static hid_report_map_t hid_rpt_map[HID_NUM_REPORTS];
+static hid_report_map_t *hid_dev_rpt_tbl;
+static uint8_t hid_dev_rpt_tbl_Len;
 
 // HID Report Map characteristic value
 // Keyboard report descriptor (using format for Boot interface descriptor)
@@ -303,7 +191,6 @@ static const uint8_t hidReportMap[] = {
 	0x81, 0x03,		//   Input (Const, Var, Abs)
 	0xC0,			// End Collectionq
 
-#if (SUPPORT_REPORT_VENDOR == true)
 	0x06, 0xFF, 0xFF,	// Usage Page(Vendor defined)
 	0x09, 0xA5,		// Usage(Vendor Defined)
 	0xA1, 0x01,		// Collection(Application)
@@ -314,26 +201,8 @@ static const uint8_t hidReportMap[] = {
 	0x95, 0x7F,		// Report Count = 127 Btyes
 	0x91, 0x02,		// Output(Data, Variable, Absolute)
 	0xC0,			// End Collection
-#endif
-
 };
 
-/// Battery Service Attributes Indexes
-enum {
-	BAS_IDX_SVC,
-
-	BAS_IDX_BATT_LVL_CHAR,
-	BAS_IDX_BATT_LVL_VAL,
-	BAS_IDX_BATT_LVL_NTF_CFG,
-	BAS_IDX_BATT_LVL_PRES_FMT,
-
-	BAS_IDX_NB,
-};
-
-#define HI_UINT16(a) (((a) >> 8) & 0xFF)
-#define LO_UINT16(a) ((a) & 0xFF)
-#define PROFILE_NUM            1
-#define PROFILE_APP_IDX        0
 
 struct gatts_profile_inst {
 	esp_gatts_cb_t gatts_cb;
@@ -357,48 +226,16 @@ static const uint8_t hidInfo[HID_INFORMATION_LEN] = {
 	0x00,			// bCountryCode
 	HID_KBD_FLAGS		// Flags
 };
-
-// HID External Report Reference Descriptor
 static uint16_t hidExtReportRefDesc = ESP_GATT_UUID_BATTERY_LEVEL;
-
-// HID Report Reference characteristic descriptor, mouse input
-static uint8_t hidReportRefMouseIn[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT };
-
-// HID Report Reference characteristic descriptor, key input
-static uint8_t hidReportRefKeyIn[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_KEY_IN, HID_REPORT_TYPE_INPUT };
-
-// HID Report Reference characteristic descriptor, LED output
-static uint8_t hidReportRefLedOut[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_LED_OUT, HID_REPORT_TYPE_OUTPUT };
-
-#if (SUPPORT_REPORT_VENDOR  == true)
-
-static uint8_t hidReportRefVendorOut[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_VENDOR_OUT, HID_REPORT_TYPE_OUTPUT };
-#endif
-
-// HID Report Reference characteristic descriptor, Feature
-static uint8_t hidReportRefFeature[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_FEATURE, HID_REPORT_TYPE_FEATURE };
-
-// HID Report Reference characteristic descriptor, consumer control input
-static uint8_t hidReportRefCCIn[HID_REPORT_REF_LEN] =
-    { HID_RPT_ID_CC_IN, HID_REPORT_TYPE_INPUT };
-
-/*
- *  Heart Rate PROFILE ATTRIBUTES
- ****************************************************************************************
- */
-
-/// hid Service uuid
+static uint8_t hidReportRefMouseIn[HID_REPORT_REF_LEN] = { HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT };
+static uint8_t hidReportRefKeyIn[HID_REPORT_REF_LEN] = { HID_RPT_ID_KEY_IN, HID_REPORT_TYPE_INPUT };
+static uint8_t hidReportRefLedOut[HID_REPORT_REF_LEN] = { HID_RPT_ID_LED_OUT, HID_REPORT_TYPE_OUTPUT };
+static uint8_t hidReportRefVendorOut[HID_REPORT_REF_LEN] = { HID_RPT_ID_VENDOR_OUT, HID_REPORT_TYPE_OUTPUT };
+static uint8_t hidReportRefFeature[HID_REPORT_REF_LEN] = { HID_RPT_ID_FEATURE, HID_REPORT_TYPE_FEATURE };
+static uint8_t hidReportRefCCIn[HID_REPORT_REF_LEN] = { HID_RPT_ID_CC_IN, HID_REPORT_TYPE_INPUT };
 static uint16_t hid_le_svc = ATT_SVC_HID;
 uint16_t hid_count = 0;
 esp_gatts_incl_svc_desc_t incl_svc = { 0 };
-
-#define CHAR_DECLARATION_SIZE   (sizeof(uint8_t))
-///the uuid definition
 static const uint16_t primary_service_uuid = ESP_GATT_UUID_PRI_SERVICE;
 static const uint16_t include_service_uuid = ESP_GATT_UUID_INCLUDE_SERVICE;
 static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;
@@ -419,16 +256,10 @@ static const uint16_t hid_report_ref_descr_uuid = ESP_GATT_UUID_RPT_REF_DESCR;
 static const uint8_t char_prop_notify = ESP_GATT_CHAR_PROP_BIT_NOTIFY;
 static const uint8_t char_prop_read = ESP_GATT_CHAR_PROP_BIT_READ;
 static const uint8_t char_prop_write_nr = ESP_GATT_CHAR_PROP_BIT_WRITE_NR;
-static const uint8_t char_prop_read_write =
-    ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ;
-static const uint8_t char_prop_read_notify =
-    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
-static const uint8_t char_prop_read_write_notify =
-    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE |
-    ESP_GATT_CHAR_PROP_BIT_NOTIFY;
-static const uint8_t char_prop_read_write_write_nr =
-    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE |
-    ESP_GATT_CHAR_PROP_BIT_WRITE_NR;
+static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ;
+static const uint8_t char_prop_read_notify = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+static const uint8_t char_prop_read_write_notify = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+static const uint8_t char_prop_read_write_write_nr = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_WRITE_NR;
 
 /// battary Service
 static const uint16_t battary_svc = ESP_GATT_UUID_BATTERY_SERVICE_SVC;
@@ -666,7 +497,6 @@ static esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
 	      sizeof(hidReportRefLedOut), sizeof(hidReportRefLedOut),
 	      hidReportRefLedOut}
 	     },
-#if (SUPPORT_REPORT_VENDOR  == true)
 	// Report Characteristic Declaration
 	[HIDD_LE_IDX_REPORT_VENDOR_OUT_CHAR] =
 	    {{ESP_GATT_AUTO_RSP},
@@ -689,7 +519,6 @@ static esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
 	      sizeof(hidReportRefVendorOut), sizeof(hidReportRefVendorOut),
 	      hidReportRefVendorOut}
 	     },
-#endif
 	// Report Characteristic Declaration
 	[HIDD_LE_IDX_REPORT_CC_IN_CHAR] =
 	    {{ESP_GATT_AUTO_RSP},
@@ -816,7 +645,208 @@ static esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
 	     },
 };
 
-static void hid_add_id_tbl(void);
+
+
+esp_err_t esp_hidd_register_callbacks(esp_hidd_event_cb_t callbacks)
+{
+	esp_err_t hidd_status;
+
+	if (callbacks != NULL) {
+		hidd_le_env.hidd_cb = callbacks;
+	} else {
+		return ESP_FAIL;
+	}
+
+	if ((hidd_status = hidd_register_cb()) != ESP_OK) {
+		return hidd_status;
+	}
+
+	esp_ble_gatts_app_register(BATTRAY_APP_ID);
+
+	if ((hidd_status = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK) {
+		return hidd_status;
+	}
+
+	return hidd_status;
+}
+
+esp_err_t esp_hidd_profile_init(void)
+{
+	if (hidd_le_env.enabled) {
+		ESP_LOGE(HID_LE_PRF_TAG,
+			 "HID device profile already initialized");
+		return ESP_FAIL;
+	}
+	// Reset the hid device target environment
+	memset(&hidd_le_env, 0, sizeof(hidd_le_env_t));
+	hidd_le_env.enabled = true;
+	return ESP_OK;
+}
+
+esp_err_t esp_hidd_profile_deinit(void)
+{
+	uint16_t hidd_svc_hdl = hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC];
+	if (!hidd_le_env.enabled) {
+		ESP_LOGE(HID_LE_PRF_TAG,
+			 "HID device profile already initialized");
+		return ESP_OK;
+	}
+
+	if (hidd_svc_hdl != 0) {
+		esp_ble_gatts_stop_service(hidd_svc_hdl);
+		esp_ble_gatts_delete_service(hidd_svc_hdl);
+	} else {
+		return ESP_FAIL;
+	}
+
+	/* register the HID device profile to the BTA_GATTS module */
+	esp_ble_gatts_app_unregister(hidd_le_env.gatt_if);
+
+	return ESP_OK;
+}
+
+uint16_t esp_hidd_get_version(void)
+{
+	return HIDD_VERSION;
+}
+
+void esp_hidd_send_consumer_value(uint16_t conn_id, uint8_t key_cmd,
+				  bool key_pressed)
+{
+	uint8_t buffer[HID_CC_IN_RPT_LEN] = { 0, 0 };
+	if (key_pressed) {
+		ESP_LOGD(HID_LE_PRF_TAG, "hid_consumer_build_report");
+		hid_consumer_build_report(buffer, key_cmd);
+	}
+	ESP_LOGD(HID_LE_PRF_TAG, "buffer[0] = %x, buffer[1] = %x", buffer[0],
+		 buffer[1]);
+	hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_CC_IN,
+			    HID_REPORT_TYPE_INPUT, HID_CC_IN_RPT_LEN, buffer);
+	return;
+}
+
+int esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask,
+				  uint8_t *keyboard_cmd, uint8_t num_key)
+{
+	if (num_key > HID_KEYBOARD_IN_RPT_LEN - 2) {
+		ESP_LOGE(HID_LE_PRF_TAG,
+			 "%s(), the number key should not be more than %d",
+			 __func__, HID_KEYBOARD_IN_RPT_LEN);
+		return 1;
+	}
+
+	uint8_t buffer[HID_KEYBOARD_IN_RPT_LEN] = { 0 };
+
+	buffer[0] = special_key_mask;
+
+	for (int i = 0; i < num_key; i++) {
+		buffer[i + 2] = keyboard_cmd[i];
+	}
+
+	ESP_LOGD(HID_LE_PRF_TAG, "the key vaule = %d,%d,%d, %d, %d, %d,%d, %d",
+		 buffer[0], buffer[1], buffer[2], buffer[3], buffer[4],
+		 buffer[5], buffer[6], buffer[7]);
+	return hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_KEY_IN,
+			    HID_REPORT_TYPE_INPUT, HID_KEYBOARD_IN_RPT_LEN,
+			    buffer);
+}
+
+void esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mickeys_x, int8_t mickeys_y) {
+	uint8_t buffer[HID_MOUSE_IN_RPT_LEN];
+
+	buffer[0] = mouse_button;	// Buttons
+	buffer[1] = mickeys_x;	// X
+	buffer[2] = mickeys_y;	// Y
+	buffer[3] = 0;		// Wheel
+	buffer[4] = 0;		// AC Pan
+
+	hid_dev_send_report(hidd_le_env.gatt_if, conn_id,
+			    HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT,
+			    HID_MOUSE_IN_RPT_LEN, buffer);
+	return;
+}
+
+void hid_dev_register_reports(uint8_t num_reports, hid_report_map_t *p_report) {
+	hid_dev_rpt_tbl = p_report;
+	hid_dev_rpt_tbl_Len = num_reports;
+	return;
+}
+
+static void hid_add_id_tbl(void) {
+	// Mouse input report
+	hid_rpt_map[0].id = hidReportRefMouseIn[0];
+	hid_rpt_map[0].type = hidReportRefMouseIn[1];
+	hid_rpt_map[0].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_MOUSE_IN_VAL];
+	hid_rpt_map[0].cccdHandle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_MOUSE_IN_VAL];
+	hid_rpt_map[0].mode = HID_PROTOCOL_MODE_REPORT;
+
+	// Key input report
+	hid_rpt_map[1].id = hidReportRefKeyIn[0];
+	hid_rpt_map[1].type = hidReportRefKeyIn[1];
+	hid_rpt_map[1].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_KEY_IN_VAL];
+	hid_rpt_map[1].cccdHandle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_KEY_IN_CCC];
+	hid_rpt_map[1].mode = HID_PROTOCOL_MODE_REPORT;
+
+	// Consumer Control input report
+	hid_rpt_map[2].id = hidReportRefCCIn[0];
+	hid_rpt_map[2].type = hidReportRefCCIn[1];
+	hid_rpt_map[2].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_CC_IN_VAL];
+	hid_rpt_map[2].cccdHandle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_CC_IN_CCC];
+	hid_rpt_map[2].mode = HID_PROTOCOL_MODE_REPORT;
+
+	// LED output report
+	hid_rpt_map[3].id = hidReportRefLedOut[0];
+	hid_rpt_map[3].type = hidReportRefLedOut[1];
+	hid_rpt_map[3].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_LED_OUT_VAL];
+	hid_rpt_map[3].cccdHandle = 0;
+	hid_rpt_map[3].mode = HID_PROTOCOL_MODE_REPORT;
+
+	// Boot keyboard input report
+	// Use same ID and type as key input report
+	hid_rpt_map[4].id = hidReportRefKeyIn[0];
+	hid_rpt_map[4].type = hidReportRefKeyIn[1];
+	hid_rpt_map[4].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_KB_IN_REPORT_VAL];
+	hid_rpt_map[4].cccdHandle = 0;
+	hid_rpt_map[4].mode = HID_PROTOCOL_MODE_BOOT;
+
+	// Boot keyboard output report
+	// Use same ID and type as LED output report
+	hid_rpt_map[5].id = hidReportRefLedOut[0];
+	hid_rpt_map[5].type = hidReportRefLedOut[1];
+	hid_rpt_map[5].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_KB_OUT_REPORT_VAL];
+	hid_rpt_map[5].cccdHandle = 0;
+	hid_rpt_map[5].mode = HID_PROTOCOL_MODE_BOOT;
+
+	// Boot mouse input report
+	// Use same ID and type as mouse input report
+	hid_rpt_map[6].id = hidReportRefMouseIn[0];
+	hid_rpt_map[6].type = hidReportRefMouseIn[1];
+	hid_rpt_map[6].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_MOUSE_IN_REPORT_VAL];
+	hid_rpt_map[6].cccdHandle = 0;
+	hid_rpt_map[6].mode = HID_PROTOCOL_MODE_BOOT;
+
+	// Feature report
+	hid_rpt_map[7].id = hidReportRefFeature[0];
+	hid_rpt_map[7].type = hidReportRefFeature[1];
+	hid_rpt_map[7].handle =
+	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_VAL];
+	hid_rpt_map[7].cccdHandle = 0;
+	hid_rpt_map[7].mode = HID_PROTOCOL_MODE_REPORT;
+
+	// Setup report ID map
+	hid_dev_register_reports(HID_NUM_REPORTS, hid_rpt_map);
+}
+
 
 void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 			 esp_ble_gatts_cb_param_t *param)
@@ -899,7 +929,6 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 				 hidd_cb)
 			(ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT, &cb_param);
 			}
-#if (SUPPORT_REPORT_VENDOR == true)
 			if (param->write.handle ==
 			    hidd_le_env.hidd_inst.
 			    att_tbl[HIDD_LE_IDX_REPORT_VENDOR_OUT_VAL]
@@ -914,7 +943,6 @@ void esp_hidd_prf_cb_hdl(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
 				 hidd_cb)
 			(ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT, &cb_param);
 			}
-#endif
 			break;
 		}
 	case ESP_GATTS_CREAT_ATTR_TAB_EVT:{
@@ -1081,85 +1109,6 @@ void hidd_get_attr_value(uint16_t handle, uint16_t *length, uint8_t **value)
 	return;
 }
 
-static void hid_add_id_tbl(void)
-{
-	// Mouse input report
-	hid_rpt_map[0].id = hidReportRefMouseIn[0];
-	hid_rpt_map[0].type = hidReportRefMouseIn[1];
-	hid_rpt_map[0].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_MOUSE_IN_VAL];
-	hid_rpt_map[0].cccdHandle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_MOUSE_IN_VAL];
-	hid_rpt_map[0].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// Key input report
-	hid_rpt_map[1].id = hidReportRefKeyIn[0];
-	hid_rpt_map[1].type = hidReportRefKeyIn[1];
-	hid_rpt_map[1].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_KEY_IN_VAL];
-	hid_rpt_map[1].cccdHandle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_KEY_IN_CCC];
-	hid_rpt_map[1].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// Consumer Control input report
-	hid_rpt_map[2].id = hidReportRefCCIn[0];
-	hid_rpt_map[2].type = hidReportRefCCIn[1];
-	hid_rpt_map[2].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_CC_IN_VAL];
-	hid_rpt_map[2].cccdHandle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_CC_IN_CCC];
-	hid_rpt_map[2].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// LED output report
-	hid_rpt_map[3].id = hidReportRefLedOut[0];
-	hid_rpt_map[3].type = hidReportRefLedOut[1];
-	hid_rpt_map[3].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_LED_OUT_VAL];
-	hid_rpt_map[3].cccdHandle = 0;
-	hid_rpt_map[3].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// Boot keyboard input report
-	// Use same ID and type as key input report
-	hid_rpt_map[4].id = hidReportRefKeyIn[0];
-	hid_rpt_map[4].type = hidReportRefKeyIn[1];
-	hid_rpt_map[4].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_KB_IN_REPORT_VAL];
-	hid_rpt_map[4].cccdHandle = 0;
-	hid_rpt_map[4].mode = HID_PROTOCOL_MODE_BOOT;
-
-	// Boot keyboard output report
-	// Use same ID and type as LED output report
-	hid_rpt_map[5].id = hidReportRefLedOut[0];
-	hid_rpt_map[5].type = hidReportRefLedOut[1];
-	hid_rpt_map[5].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_KB_OUT_REPORT_VAL];
-	hid_rpt_map[5].cccdHandle = 0;
-	hid_rpt_map[5].mode = HID_PROTOCOL_MODE_BOOT;
-
-	// Boot mouse input report
-	// Use same ID and type as mouse input report
-	hid_rpt_map[6].id = hidReportRefMouseIn[0];
-	hid_rpt_map[6].type = hidReportRefMouseIn[1];
-	hid_rpt_map[6].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_BOOT_MOUSE_IN_REPORT_VAL];
-	hid_rpt_map[6].cccdHandle = 0;
-	hid_rpt_map[6].mode = HID_PROTOCOL_MODE_BOOT;
-
-	// Feature report
-	hid_rpt_map[7].id = hidReportRefFeature[0];
-	hid_rpt_map[7].type = hidReportRefFeature[1];
-	hid_rpt_map[7].handle =
-	    hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_VAL];
-	hid_rpt_map[7].cccdHandle = 0;
-	hid_rpt_map[7].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// Setup report ID map
-	hid_dev_register_reports(HID_NUM_REPORTS, hid_rpt_map);
-}
-
-static hid_report_map_t *hid_dev_rpt_tbl;
-static uint8_t hid_dev_rpt_tbl_Len;
-
 static hid_report_map_t *hid_dev_rpt_by_id(uint8_t id, uint8_t type)
 {
 	hid_report_map_t *rpt = hid_dev_rpt_tbl;
@@ -1172,13 +1121,6 @@ static hid_report_map_t *hid_dev_rpt_by_id(uint8_t id, uint8_t type)
 	}
 
 	return NULL;
-}
-
-void hid_dev_register_reports(uint8_t num_reports, hid_report_map_t *p_report)
-{
-	hid_dev_rpt_tbl = p_report;
-	hid_dev_rpt_tbl_Len = num_reports;
-	return;
 }
 
 int hid_dev_send_report(esp_gatt_if_t gatts_if, uint16_t conn_id,
