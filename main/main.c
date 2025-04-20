@@ -46,6 +46,7 @@ static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
 static char *str = "----\0";
 static lv_obj_t *label = NULL;
+static esp_lcd_panel_handle_t panel = NULL;
 
 static adc_channel_t channels[4] = {
 	ADC_CHANNEL_0,
@@ -191,7 +192,9 @@ void hid_task(void *pvParameters)
 			continue;
 		}
 		for (i = 0; i < LENGTH(channels); i++) {
-			ESP_ERROR_CHECK(adc_oneshot_read(adc, channels[i], &n));
+			if (adc_oneshot_read(adc, channels[i], &n)) {
+				goto out;
+			}
 			ESP_LOGI(TAG, "Channel[%d] Raw Data: %d", i, n);
 
 			if (n < 2150 || n > 3000) {
@@ -215,6 +218,8 @@ void hid_task(void *pvParameters)
 		}
 		lv_label_set_text(label, str);
 	}
+out:
+	esp_lcd_panel_disp_on_off(panel, false);
 	ESP_ERROR_CHECK(adc_oneshot_del_unit(adc));
 
 }
@@ -275,7 +280,6 @@ void app_main(void)
 	ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
 
 	ESP_LOGI(TAG, "Install SSD1306 panel driver");
-	esp_lcd_panel_handle_t panel_handle = NULL;
 	esp_lcd_panel_ssd1306_config_t ssd1306_config = {
 		.height = LCD_V_RES,
 	};
@@ -286,16 +290,16 @@ void app_main(void)
 	};
 
 	ESP_LOGI(TAG, "new panel");
-	ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
+	ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel));
 
 	ESP_LOGI(TAG, "reset panel");
-	ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+	ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
 
 	ESP_LOGI(TAG, "init panel");
-	ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
+	ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
 
 	ESP_LOGI(TAG, "cycle panel");
-	ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+	ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
 	ESP_LOGI(TAG, "Initialize LVGL");
 	const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -303,7 +307,7 @@ void app_main(void)
 
 	const lvgl_port_display_cfg_t disp_cfg = {
 		.io_handle = io_handle,
-		.panel_handle = panel_handle,
+		.panel_handle = panel,
 		.buffer_size = LCD_H_RES * LCD_V_RES,
 		.double_buffer = true,
 		.hres = LCD_H_RES,
@@ -357,6 +361,7 @@ void app_main(void)
 
 	if ((ret = esp_hidd_profile_init()) != ESP_OK) {
 		ESP_LOGE(TAG, "init bluedroid failed");
+		return;
 	}
 
 	esp_ble_gap_register_callback(gap_event_handler);
