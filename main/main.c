@@ -42,7 +42,7 @@
 static const char *TAG = "lask5";
 static int disconnects = 0;
 static uint16_t hid_conn_id = 0;
-static bool sec_conn = false;
+static volatile bool sec_conn = false;
 static char *str = "----\0";
 static lv_obj_t *label = NULL;
 static esp_lcd_panel_handle_t panel = NULL;
@@ -184,17 +184,25 @@ const keymap qwerty[] = {
 
 void hid_task(void *pvParameters)
 {
-	int i, n;
+	int i, j, n;
 	uint8_t c;
-	for (;; vTaskDelay(pdMS_TO_TICKS(100))) {
+	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(100))) {
 		if (!sec_conn) {
+			j = -1;
 			continue;
 		}
 		for (i = 0; i < LENGTH(channels); i++) {
+			if (j == 0) {
+				ESP_LOGI(TAG, "reading adc");
+			}
 			if (adc_oneshot_read(adc, channels[i], &n)) {
 				goto out;
 			}
-			ESP_LOGI(TAG, "Channel[%d] Raw Data: %d", i, n);
+
+			if (j % 50 == 0) {
+				ESP_LOGI(TAG, "Channel[%d] Raw Data: %d", i, n);
+			}
+
 
 			if (n < 2150 || n > 3000) {
 				continue;
@@ -207,11 +215,13 @@ void hid_task(void *pvParameters)
 			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 1)) {
 				sec_conn = false;
 				ESP_LOGI(TAG, "failed sending up");
+				j = 0;
 				continue;
 			}
 			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 0)) {
 				sec_conn = false;
 				ESP_LOGI(TAG, "failed down");
+				j = 0;
 				continue;
 			}
 		}
