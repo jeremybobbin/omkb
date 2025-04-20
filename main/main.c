@@ -18,6 +18,12 @@
 #include "freertos/task.h"
 #include "hid_dev.h"
 #include "nvs_flash.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "driver/i2c_master.h"
+#include "esp_lvgl_port.h"
+#include "lvgl.h"
 
 #include "sdkconfig.h"
 
@@ -25,10 +31,21 @@
 #define MIN(a, b)  ((a) > (b) ? (b) : (a))
 #define MAX(a, b)  ((a) < (b) ? (b) : (a))
 
+#define LCD_PIXEL_CLOCK_HZ (400 * 1000)
+#define PIN_NUM_SDA                  8
+#define PIN_NUM_SCL                  9
+#define PIN_NUM_RST                 -1
+#define LCD_H_RES                  128
+#define LCD_V_RES                   32
+#define LCD_CMD_BITS                 8
+#define LCD_PARAM_BITS               8
+
 static const char *TAG = "lask5";
 static int disconnects = 0;
 static uint16_t hid_conn_id = 0;
 static bool sec_conn = false;
+static char *str = "----\0";
+static lv_obj_t *label = NULL;
 
 static adc_channel_t channels[4] = {
 	ADC_CHANNEL_0,
@@ -65,10 +82,10 @@ static esp_ble_adv_params_t hidd_adv_params = {
 	.own_addr_type        =  BLE_ADDR_TYPE_PUBLIC,
 	.channel_map          =  ADV_CHNL_ALL,
 	.adv_filter_policy    =  ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-	.peer_addr_type       =  0,
+	//.peer_addr_type       =  0,
 	.adv_int_min          =  0x20,
 	.adv_int_max          =  0x30,
-	.peer_addr            =  { 0x80, 0x86, 0xF2, 0xD9, 0x8C, 0xAC },
+	//.peer_addr            =  { 0x80, 0x86, 0xF2, 0xD9, 0x8C, 0xAC },
 };
 
 static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param) {
@@ -141,23 +158,28 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 
 adc_oneshot_unit_handle_t adc;
 
-const uint8_t qwerty[] = {
-	HID_KEY_0,
-	HID_KEY_P,
-	HID_KEY_SEMI_COLON,
-	HID_KEY_FWD_SLASH,
-	HID_KEY_9,
-	HID_KEY_O,
-	HID_KEY_L,
-	HID_KEY_DOT,
-	HID_KEY_8,
-	HID_KEY_I,
-	HID_KEY_K,
-	HID_KEY_COMMA,
-	HID_KEY_7,
-	HID_KEY_U,
-	HID_KEY_J,
-	HID_KEY_M,
+typedef struct {
+	int ch;
+	int hid;
+} keymap;
+
+const keymap qwerty[] = {
+	{ '0',  HID_KEY_0,                },
+	{ 'P',  HID_KEY_P,                },
+	{ ';',  HID_KEY_SEMI_COLON,       },
+	{ '/',  HID_KEY_FWD_SLASH,        },
+	{ '9',  HID_KEY_9,                },
+	{ 'O',  HID_KEY_O,                },
+	{ 'L',  HID_KEY_L,                },
+	{ '.',  HID_KEY_DOT,              },
+	{ '8',  HID_KEY_8,                },
+	{ 'I',  HID_KEY_I,                },
+	{ 'K',  HID_KEY_K,                },
+	{ ',',  HID_KEY_COMMA,            },
+	{ '7',  HID_KEY_7,                },
+	{ 'U',  HID_KEY_U,                },
+	{ 'J',  HID_KEY_J,                },
+	{ 'M',  HID_KEY_M,                },
 };
 
 void hid_task(void *pvParameters)
@@ -177,7 +199,8 @@ void hid_task(void *pvParameters)
 			}
 			n = (n-2150)/75;
 			n = MIN(n, 4);
-			c = qwerty[(i*4)+n];
+			c = qwerty[(i*4)+n].hid;
+			str[i] = qwerty[(i*4)+n].ch;
 			ESP_LOGI(TAG, "sending key: %d\n", c);
 			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 1)) {
 				sec_conn = false;
@@ -190,7 +213,7 @@ void hid_task(void *pvParameters)
 				continue;
 			}
 		}
-
+		lv_label_set_text(label, str);
 	}
 	ESP_ERROR_CHECK(adc_oneshot_del_unit(adc));
 
@@ -226,6 +249,89 @@ void app_main(void)
 	for (i = 0; i < LENGTH(channels); i++) {
 		ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, channels[i], &chan));
 	}
+
+	ESP_LOGI(TAG, "Initialize I2C bus");
+	i2c_master_bus_handle_t i2c_bus = NULL;
+	i2c_master_bus_config_t bus_config = {
+		.clk_source = I2C_CLK_SRC_DEFAULT,
+		.glitch_ignore_cnt = 7,
+		.i2c_port = I2C_NUM_0,
+		.sda_io_num = PIN_NUM_SDA,
+		.scl_io_num = PIN_NUM_SCL,
+		.flags.enable_internal_pullup = true,
+	};
+	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
+
+	ESP_LOGI(TAG, "Install panel IO");
+	esp_lcd_panel_io_handle_t io_handle = NULL;
+	esp_lcd_panel_io_i2c_config_t io_config = {
+		.dev_addr = 0x3C,
+		.scl_speed_hz = LCD_PIXEL_CLOCK_HZ,
+		.control_phase_bytes = 1,
+		.lcd_cmd_bits = LCD_CMD_BITS,
+		.lcd_param_bits = LCD_PARAM_BITS,
+		.dc_bit_offset = 6,
+	};
+	ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
+
+	ESP_LOGI(TAG, "Install SSD1306 panel driver");
+	esp_lcd_panel_handle_t panel_handle = NULL;
+	esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+		.height = LCD_V_RES,
+	};
+	esp_lcd_panel_dev_config_t panel_config = {
+		.bits_per_pixel = 1,
+		.reset_gpio_num = PIN_NUM_RST,
+		.vendor_config = &ssd1306_config,
+	};
+
+	ESP_LOGI(TAG, "new panel");
+	ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel_handle));
+
+	ESP_LOGI(TAG, "reset panel");
+	ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+
+	ESP_LOGI(TAG, "init panel");
+	ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
+
+	ESP_LOGI(TAG, "cycle panel");
+	ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+
+	ESP_LOGI(TAG, "Initialize LVGL");
+	const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+	lvgl_port_init(&lvgl_cfg);
+
+	const lvgl_port_display_cfg_t disp_cfg = {
+		.io_handle = io_handle,
+		.panel_handle = panel_handle,
+		.buffer_size = LCD_H_RES * LCD_V_RES,
+		.double_buffer = true,
+		.hres = LCD_H_RES,
+		.vres = LCD_V_RES,
+		.monochrome = true,
+		.rotation = {
+			.swap_xy = false,
+			.mirror_x = false,
+			.mirror_y = false,
+		}
+	};
+	lv_disp_t *disp = lvgl_port_add_disp(&disp_cfg);
+
+	/* Rotation of the screen */
+	lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
+
+	ESP_LOGI(TAG, "Display LVGL Scroll Text");
+	// Lock the mutex due to the LVGL APIs are not thread-safe
+	if (!lvgl_port_lock(0)) {
+		ESP_LOGI(TAG, "failed to lock LVGL port");
+		return;
+	}
+
+	lv_obj_t *scr = lv_disp_get_scr_act(disp);
+	label = lv_label_create(scr);
+	lv_obj_set_width(label, disp->driver->hor_res);
+	lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 0);
+	lvgl_port_unlock();
 
 	esp_bt_controller_config_t bt = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 	if ((ret = esp_bt_controller_init(&bt))) {
@@ -267,6 +373,6 @@ void app_main(void)
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY,    &init_key, sizeof(init_key));
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY,     &rsp_key,  sizeof(rsp_key));
 
-	xTaskCreate(&hid_task, "hid_task", 4096<<2, NULL, 5, NULL);
+	xTaskCreate(&hid_task, "hid_task", 2048<<3, NULL, 5, NULL);
 
 }
