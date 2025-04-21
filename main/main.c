@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_continuous.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_device.h"
 #include "esp_bt.h"
@@ -34,24 +34,28 @@
 #define PIN_NUM_SDA                  8
 #define PIN_NUM_SCL                  9
 #define PIN_NUM_RST                 -1
-#define LCD_H_RES                  128
-#define LCD_V_RES                   32
+#define LCD_WIDTH                  128
+#define LCD_HEIGHT                  32
 #define LCD_CMD_BITS                 8
 #define LCD_PARAM_BITS               8
 
 static const char *TAG = "lask5";
 static int disconnects = 0;
-static uint16_t hid_conn_id = 0;
+static volatile uint16_t hid_conn_id = 0;
 static volatile bool sec_conn = false;
 static char *str = "----\0";
-static lv_obj_t *label = NULL;
+static lv_obj_t *l1 = NULL;
+static lv_obj_t *l2 = NULL;
+
 static esp_lcd_panel_handle_t panel = NULL;
 
-static adc_channel_t channels[4] = {
+static adc_channel_t channels[] = {
 	ADC_CHANNEL_0,
 	ADC_CHANNEL_1,
 	ADC_CHANNEL_2,
-	ADC_CHANNEL_3
+	ADC_CHANNEL_3,
+	ADC_CHANNEL_4,
+	ADC_CHANNEL_5,
 };
 
 static uint8_t hidd_service_uuid128[] = {
@@ -126,14 +130,14 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 	switch (event) {
 	case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
 		esp_ble_gap_start_advertising(&hidd_adv_params);
-		sec_conn = false;
+		//sec_conn = false;
 		break;
 	case ESP_GAP_BLE_SEC_REQ_EVT:
 		for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
 			ESP_LOGD(TAG, "%x:", param->ble_security.ble_req.bd_addr[i]);
 		}
 		esp_ble_gap_security_rsp(param->ble_security.ble_req.bd_addr, true);
-		sec_conn = false;
+		//sec_conn = false;
 		break;
 	case ESP_GAP_BLE_AUTH_CMPL_EVT:
 		esp_bd_addr_t bd_addr;
@@ -156,7 +160,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 	}
 }
 
-adc_oneshot_unit_handle_t adc;
+adc_continuous_handle_t adc = NULL;
 
 typedef struct {
 	int ch;
@@ -184,27 +188,104 @@ const keymap qwerty[] = {
 
 void hid_task(void *pvParameters)
 {
-	int i, j, n;
+	int i, j;
+	int n, m;
+	adc_digi_output_data_t buf[LENGTH(channels)];
 	uint8_t c;
-	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(100))) {
+	adc_digi_output_data_t *p;
+	esp_err_t ret;
+
+	adc_continuous_handle_cfg_t adc_config = {
+		.max_store_buf_size = sizeof(buf)*22,
+		.conv_frame_size = sizeof(buf),
+	};
+
+	adc_digi_pattern_config_t adc_pattern[LENGTH(channels)];
+	for (i = 0; i < LENGTH(channels); i++) {
+		adc_pattern[i].atten = ADC_ATTEN_DB_12;
+		adc_pattern[i].channel = channels[i] & 0x7;
+		adc_pattern[i].unit = ADC_UNIT_1;
+		adc_pattern[i].bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+	}
+
+	adc_continuous_config_t dig_cfg = {
+		.sample_freq_hz = 20 * 1000,
+		.conv_mode = ADC_CONV_SINGLE_UNIT_1,
+		.format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
+		.pattern_num = LENGTH(channels),
+		.adc_pattern = adc_pattern,
+	};
+
+	if (adc_continuous_new_handle(&adc_config, &adc) != ESP_OK) {
+		ESP_LOGI(TAG, "failed to config ADC");
+		return;
+	}
+
+	if (adc_continuous_config(adc, &dig_cfg) != ESP_OK) {
+		ESP_LOGI(TAG, "failed to init ADC");
+		return;
+	}
+
+	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(50))) {
 		if (!sec_conn) {
 			j = -1;
 			continue;
 		}
-		for (i = 0; i < LENGTH(channels); i++) {
-			if (j == 0) {
-				ESP_LOGI(TAG, "reading adc");
-			}
-			if (adc_oneshot_read(adc, channels[i], &n)) {
-				goto out;
-			}
 
-			if (j % 50 == 0) {
-				ESP_LOGI(TAG, "Channel[%d] Raw Data: %d", i, n);
-			}
+		if (adc_continuous_start(adc) != ESP_OK) {
+			ESP_LOGI(TAG, "failed to start ADC");
+			continue;
+		}
 
+		if ((ret = adc_continuous_read(adc, (uint8_t*)buf, sizeof(buf), (uint32_t*)(&n), 10)) != ESP_OK) {
+			ESP_LOGI(TAG, "arf: %d %d", n, ret);
+			adc_continuous_stop(adc);
+			continue;
+		} else if (1 || j == 0) {
+			//ESP_LOGI(TAG, "read %d from adc", n);
+		}
+
+		if (adc_continuous_stop(adc) != ESP_OK) {
+			ESP_LOGI(TAG, "failed to stop ADC");
+		}
+
+		n = buf[4].type2.data;
+		m = buf[5].type2.data;
+		lv_label_set_text(l1, str);
+		char txt[12];
+		sprintf(txt, "%d %d", n, m);
+		lv_label_set_text(l2, txt);
+		lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
+		lv_obj_align(l2, LV_ALIGN_TOP_LEFT, 128/2, 0);
+
+		if (n >= 1900 && n <= 2000) {
+			n = 0;
+		} else {
+			n = (n-1950)/32;
+		}
+
+		if (m >= 1900 && m <= 2000) {
+			m = 0;
+		} else {
+			m = (m-1950)/32;
+		}
+
+		if (n == 0 && m == 0) {
+			// ok
+		} else if (esp_hidd_send_mouse_value(hid_conn_id, 0, (int8_t)-m, (int8_t)n)) {
+			ESP_LOGI(TAG, "failed to send mouse value");
+		}
+
+		// digits
+		for (i = 0; i < 4; i++) {
+			n = buf[i].type2.data;
+
+			if (j % 20 == 0) {
+				ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
+			}
 
 			if (n < 2150 || n > 3000) {
+				str[i] = ' ';
 				continue;
 			}
 			n = (n-2150)/75;
@@ -225,11 +306,19 @@ void hid_task(void *pvParameters)
 				continue;
 			}
 		}
-		lv_label_set_text(label, str);
+
+		if (j%20) {
+			continue;
+		}
+
+		for (i=0; i < LENGTH(channels); i++) {
+			n = buf[i].type2.data;
+			ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
+		}
 	}
-out:
 	esp_lcd_panel_disp_on_off(panel, false);
-	ESP_ERROR_CHECK(adc_oneshot_del_unit(adc));
+	adc_continuous_stop(adc);
+	adc_continuous_deinit(adc);
 
 }
 
@@ -248,21 +337,6 @@ void app_main(void)
 
 	ESP_ERROR_CHECK(ret);
 	ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
-
-
-	const adc_oneshot_chan_cfg_t chan = {
-		.atten = ADC_ATTEN_DB_12,
-		.bitwidth = ADC_BITWIDTH_DEFAULT,
-	};
-
-	const adc_oneshot_unit_init_cfg_t unit = {
-		.unit_id = ADC_UNIT_1,
-		.ulp_mode = ADC_ULP_MODE_DISABLE,
-	};
-	ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit, &adc));
-	for (i = 0; i < LENGTH(channels); i++) {
-		ESP_ERROR_CHECK(adc_oneshot_config_channel(adc, channels[i], &chan));
-	}
 
 	ESP_LOGI(TAG, "Initialize I2C bus");
 	i2c_master_bus_handle_t i2c_bus = NULL;
@@ -290,7 +364,7 @@ void app_main(void)
 
 	ESP_LOGI(TAG, "Install SSD1306 panel driver");
 	esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-		.height = LCD_V_RES,
+		.height = LCD_HEIGHT,
 	};
 	esp_lcd_panel_dev_config_t panel_config = {
 		.bits_per_pixel = 1,
@@ -317,10 +391,10 @@ void app_main(void)
 	const lvgl_port_display_cfg_t disp_cfg = {
 		.io_handle = io_handle,
 		.panel_handle = panel,
-		.buffer_size = LCD_H_RES * LCD_V_RES,
+		.buffer_size = LCD_WIDTH * LCD_HEIGHT,
 		.double_buffer = true,
-		.hres = LCD_H_RES,
-		.vres = LCD_V_RES,
+		.hres = LCD_WIDTH,
+		.vres = LCD_HEIGHT,
 		.monochrome = true,
 		.rotation = {
 			.swap_xy = false,
@@ -341,9 +415,12 @@ void app_main(void)
 	}
 
 	lv_obj_t *scr = lv_disp_get_scr_act(disp);
-	label = lv_label_create(scr);
-	lv_obj_set_width(label, disp->driver->hor_res);
-	lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 0);
+	l1 = lv_label_create(scr);
+	l2 = lv_label_create(scr);
+	lv_obj_set_width(l1, disp->driver->hor_res/2);
+	lv_obj_set_width(l2,    disp->driver->hor_res/2);
+	lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
+	lv_obj_align(l1, LV_ALIGN_TOP_LEFT, disp->driver->hor_res/2, 0);
 	lvgl_port_unlock();
 
 	esp_bt_controller_config_t bt = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -387,6 +464,6 @@ void app_main(void)
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY,    &init_key, sizeof(init_key));
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY,     &rsp_key,  sizeof(rsp_key));
 
-	xTaskCreate(&hid_task, "hid_task", 2048<<3, NULL, 5, NULL);
+	xTaskCreate(&hid_task, "hid_task", 2048<<1, NULL, 5, NULL);
 
 }

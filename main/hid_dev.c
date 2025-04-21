@@ -693,7 +693,7 @@ int esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask, 
 	return hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_KEY_IN, HID_REPORT_TYPE_INPUT, HID_KEYBOARD_IN_RPT_LEN, buffer);
 }
 
-void esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mickeys_x, int8_t mickeys_y)
+int esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mickeys_x, int8_t mickeys_y)
 {
 	uint8_t buffer[HID_MOUSE_IN_RPT_LEN];
 
@@ -703,8 +703,7 @@ void esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mi
 	buffer[3] = 0;		// Wheel
 	buffer[4] = 0;		// AC Pan
 
-	hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT, HID_MOUSE_IN_RPT_LEN, buffer);
-	return;
+	return hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT, HID_MOUSE_IN_RPT_LEN, buffer);
 }
 
 void hid_dev_register_reports(uint8_t num_reports, hid_report_map_t *p_report)
