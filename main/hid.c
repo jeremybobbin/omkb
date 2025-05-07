@@ -639,7 +639,8 @@ void hid_add_id_tbl(void)
 	hid_rpt_map[7].mode = HID_PROTOCOL_MODE_REPORT;
 
 	// Setup report ID map
-	hid_dev_register_reports(HID_NUM_REPORTS, hid_rpt_map);
+	hid_dev_rpt_tbl = hid_rpt_map;
+	hid_dev_rpt_tbl_Len = HID_NUM_REPORTS;
 }
 
 esp_err_t esp_hidd_profile_init(void)
@@ -718,13 +719,6 @@ int esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mic
 	buffer[4] = 0;		// AC Pan
 
 	return hid_dev_send_report(hidd_le_env.gatt_if, conn_id, HID_RPT_ID_MOUSE_IN, HID_REPORT_TYPE_INPUT, HID_MOUSE_IN_RPT_LEN, buffer);
-}
-
-void hid_dev_register_reports(uint8_t num_reports, hid_report_map_t *p_report)
-{
-	hid_dev_rpt_tbl = p_report;
-	hid_dev_rpt_tbl_Len = num_reports;
-	return;
 }
 
 void hidd_le_init(void)

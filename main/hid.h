@@ -599,7 +599,6 @@ void esp_hidd_send_consumer_value(uint16_t conn_id, uint8_t key_cmd, bool key_pr
 int esp_hidd_send_keyboard_value(uint16_t conn_id, key_mask_t special_key_mask, uint8_t *keyboard_cmd, uint8_t num_key);
 int esp_hidd_send_mouse_value(uint16_t conn_id, uint8_t mouse_button, int8_t mickeys_x, int8_t mickeys_y);
 
-void hid_dev_register_reports(uint8_t num_reports, hid_report_map_t *p_report);
 int hid_dev_send_report(esp_gatt_if_t gatts_if, uint16_t conn_id, uint8_t id, uint8_t type, uint8_t length, uint8_t *data);
 void hid_consumer_build_report(uint8_t *buffer, consumer_cmd_t cmd);
 void hid_keyboard_build_report(uint8_t *buffer, keyboard_cmd_t cmd);
