@@ -24,14 +24,8 @@
 #define MIN(a, b)  ((a) > (b) ? (b) : (a))
 #define MAX(a, b)  ((a) < (b) ? (b) : (a))
 
-#define LCD_PIXEL_CLOCK_HZ (400 * 1000)
-#define PIN_NUM_SDA                  8
-#define PIN_NUM_SCL                  9
-#define PIN_NUM_RST                 -1
-#define LCD_WIDTH                  128
-#define LCD_HEIGHT                  32
-#define LCD_CMD_BITS                 8
-#define LCD_PARAM_BITS               8
+#define W                          128
+#define H                           32
 
 static const char *TAG = "lask5";
 static volatile int disconnects = 0;
@@ -494,8 +488,8 @@ void app_main(void)
 		.clk_source = I2C_CLK_SRC_DEFAULT,
 		.glitch_ignore_cnt = 7,
 		.i2c_port = I2C_NUM_0,
-		.sda_io_num = PIN_NUM_SDA,
-		.scl_io_num = PIN_NUM_SCL,
+		.sda_io_num = 8,
+		.scl_io_num = 9,
 		.flags.enable_internal_pullup = true,
 	};
 	ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
@@ -504,21 +498,21 @@ void app_main(void)
 	esp_lcd_panel_io_handle_t io_handle = NULL;
 	esp_lcd_panel_io_i2c_config_t io_config = {
 		.dev_addr = 0x3C,
-		.scl_speed_hz = LCD_PIXEL_CLOCK_HZ,
+		.scl_speed_hz = 400 * 1000,
 		.control_phase_bytes = 1,
-		.lcd_cmd_bits = LCD_CMD_BITS,
-		.lcd_param_bits = LCD_PARAM_BITS,
+		.lcd_cmd_bits = 32,
+		.lcd_param_bits = 8,
 		.dc_bit_offset = 6,
 	};
 	ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &io_handle));
 
 	ESP_LOGI(TAG, "Install SSD1306 panel driver");
 	esp_lcd_panel_ssd1306_config_t ssd1306_config = {
-		.height = LCD_HEIGHT,
+		.height = H,
 	};
 	esp_lcd_panel_dev_config_t panel_config = {
 		.bits_per_pixel = 1,
-		.reset_gpio_num = PIN_NUM_RST,
+		.reset_gpio_num = -1,
 		.vendor_config = &ssd1306_config,
 	};
 
