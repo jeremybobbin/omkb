@@ -39,6 +39,7 @@ static volatile int disconnects = 0;
 static volatile uint16_t gatts_interface = ESP_GATT_IF_NONE;
 static volatile uint16_t hid_conn_id = 0;
 static volatile bool sec_conn = false;
+static bool left = 1;
 
 static char *str = "----\0";
 static lv_obj_t *l1 = NULL;
@@ -222,21 +223,47 @@ typedef struct {
 
 const keymap qwerty[] = {
 	{ '0',  HID_KEY_0,                },
-	{ 'P',  HID_KEY_P,                },
+	{ 'p',  HID_KEY_P,                },
 	{ ';',  HID_KEY_SEMI_COLON,       },
 	{ '/',  HID_KEY_FWD_SLASH,        },
 	{ '9',  HID_KEY_9,                },
-	{ 'O',  HID_KEY_O,                },
-	{ 'L',  HID_KEY_L,                },
+	{ 'o',  HID_KEY_O,                },
+	{ 'l',  HID_KEY_L,                },
 	{ '.',  HID_KEY_DOT,              },
 	{ '8',  HID_KEY_8,                },
-	{ 'I',  HID_KEY_I,                },
-	{ 'K',  HID_KEY_K,                },
+	{ 'i',  HID_KEY_I,                },
+	{ 'k',  HID_KEY_K,                },
 	{ ',',  HID_KEY_COMMA,            },
 	{ '7',  HID_KEY_7,                },
-	{ 'U',  HID_KEY_U,                },
-	{ 'J',  HID_KEY_J,                },
-	{ 'M',  HID_KEY_M,                },
+	{ 'u',  HID_KEY_U,                },
+	{ 'j',  HID_KEY_J,                },
+	{ 'm',  HID_KEY_M,                },
+	{ '6',  HID_KEY_6,                },
+	{ 'y',  HID_KEY_Y,                },
+	{ 'h',  HID_KEY_H,                },
+	{ 'n',  HID_KEY_N,                },
+	{ '5',  HID_KEY_5,                },
+	{ 't',  HID_KEY_T,                },
+	{ 'g',  HID_KEY_G,                },
+	{ 'b',  HID_KEY_B,                },
+	{ '4',  HID_KEY_4,                },
+	{ 'r',  HID_KEY_R,                },
+	{ 'f',  HID_KEY_F,                },
+	{ 'v',  HID_KEY_V,                },
+	{ '3',  HID_KEY_3,                },
+	{ 'e',  HID_KEY_E,                },
+	{ 'd',  HID_KEY_D,                },
+	{ 'c',  HID_KEY_C,                },
+	{ '2',  HID_KEY_2,                },
+	{ 'w',  HID_KEY_W,                },
+	{ 's',  HID_KEY_S,                },
+	{ 'x',  HID_KEY_X,                },
+	{ '1',  HID_KEY_1,                },
+	{ 'q',  HID_KEY_Q,                },
+	{ 'a',  HID_KEY_A,                },
+	{ 'z',  HID_KEY_Z,                },
+	{ '`',  HID_KEY_GRV_ACCENT,       },
+	{ '\t', HID_KEY_TAB,              },
 };
 
 void listen_adc(void *pvParameters)
@@ -311,16 +338,16 @@ void listen_adc(void *pvParameters)
 		lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
 		lv_obj_align(l2, LV_ALIGN_TOP_LEFT, 128/2, 0);
 
-		if (n >= 1900 && n <= 2000) {
+		if (n >= 1900 && n <= 2100) {
 			n = 0;
 		} else {
-			n = (n-1950)/32;
+			n = (n-2000)/32;
 		}
 
-		if (m >= 1900 && m <= 2000) {
+		if (m >= 1900 && m <= 2100) {
 			m = 0;
 		} else {
-			m = (m-1950)/32;
+			m = (m-2000)/32;
 		}
 
 		if (n == 0 && m == 0) {
@@ -343,8 +370,8 @@ void listen_adc(void *pvParameters)
 			}
 			n = (n-2150)/75;
 			n = MIN(n, 4);
-			c = qwerty[(i*4)+n].hid;
-			str[i] = qwerty[(i*4)+n].ch;
+			c = qwerty[(i*4)+n+(left?24:0)].hid;
+			str[i] = qwerty[(i*4)+n+(left?24:0)].ch;
 			ESP_LOGI(TAG, "sending key: %d\n", c);
 			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 1)) {
 				sec_conn = false;
