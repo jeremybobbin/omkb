@@ -16,9 +16,10 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "hid_dev.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
+
+#include "hid.h"
 
 #define LENGTH(x)  ((int)(sizeof (x) / sizeof *(x)))
 #define MIN(a, b)  ((a) > (b) ? (b) : (a))

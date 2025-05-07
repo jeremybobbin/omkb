@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "esp_log.h"
-#include "hid_dev.h"
+#include "hid.h"
 
 // HID keyboard input report length
 #define HID_KEYBOARD_IN_RPT_LEN     8
