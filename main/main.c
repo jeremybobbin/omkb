@@ -32,7 +32,7 @@ static char *str = "----\0";
 
 static esp_lcd_panel_handle_t panel = NULL;
 
-static QueueHandle_t KeyboardQueue, MouseQueue, NetworkQueue;
+static QueueHandle_t KeyboardQueue, MouseQueue, DisplayQueue, NetworkQueue;
 
 // bluetooth
 static const char *TAG = "lask5";
@@ -375,6 +375,8 @@ void listen_adc(void *pvParameters)
 			continue;
 		}
 
+		xQueueSend(DisplayQueue, item, ~0);
+
 		for (i=0; i < LENGTH(channels); i++) {
 			n = buf[i].type2.data;
 			//ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
@@ -400,12 +402,23 @@ void listen_adc(void *pvParameters)
 
 void draw(void *pvParameters)
 {
-	int i;
+	int i, j, k, m = 0;
+	uint32_t *bp, buf[W];
 	char txt[24] = {};
-	for (i = 0;; i++, vTaskDelay(pdMS_TO_TICKS(50))) {
-		//xQueueReceive(KeyboardQueue, item, ~0);
-		sprintf(txt, "%d %d", i, i);
+	uint16_t items[4];
 
+	for (i = 0;; i++, vTaskDelay(pdMS_TO_TICKS(50))) {
+		xQueueReceive(DisplayQueue, items, ~0);
+
+		bp = &buf[i%LENGTH(buf)];
+		*bp = 0;
+		for (j = 0; j < LENGTH(items); j++) {
+			*bp |= 1<<MIN(H, items[j]/3000);
+		}
+
+		for (j = 0; j < i && j < W; j--) {
+			esp_lcd_panel_draw_bitmap(panel, j, 0, j, H, &buf[(j-i)%LENGTH(buf)]);
+		}
 	}
 
 	esp_lcd_panel_disp_on_off(panel, false);
@@ -465,6 +478,12 @@ void app_main(void)
 	esp_err_t ret;
 	int i;
 	uint8_t key_size, init_key, rsp_key;
+
+	DisplayQueue = xQueueCreate(1, sizeof(uint16_t)*4);
+	if (DisplayQueue == NULL) {
+		ESP_LOGI(TAG, "failed create input queue");
+		return;
+	}
 
 	KeyboardQueue = xQueueCreate(1, sizeof(Key*));
 	if (KeyboardQueue == NULL) {
