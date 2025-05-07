@@ -16,6 +16,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
 
@@ -46,6 +47,8 @@ static lv_obj_t *l1 = NULL;
 static lv_obj_t *l2 = NULL;
 
 static esp_lcd_panel_handle_t panel = NULL;
+
+static QueueHandle_t KeyboardQueue, MouseQueue, NetworkQueue;
 
 static adc_channel_t channels[] = {
 	ADC_CHANNEL_0,
@@ -90,9 +93,7 @@ static esp_ble_adv_params_t hidd_adv_params = {
 	//.peer_addr            =  { 0x80, 0x86, 0xF2, 0xD9, 0x8C, 0xAC },
 };
 
-static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
-{
-
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
 	switch (event) {
 	case ESP_GATTS_REG_EVT:
 		ESP_LOGI(TAG, "ESP_GATTS_REG_EVT %d", param->reg.app_id);
@@ -154,26 +155,76 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 		}
 		switch (param->add_attr_tab.num_handle) {
 		case BAS_IDX_NB:
+			if (param->add_attr_tab.status != ESP_GATT_OK) {
+				break;
+			}
 			incl_svc.start_hdl = param->add_attr_tab.handles[BAS_IDX_SVC];
 			incl_svc.end_hdl = incl_svc.start_hdl + BAS_IDX_NB - 1;
 			ESP_LOGI(TAG, "start added the hid service to the stack database. incl_handle = %d", incl_svc.start_hdl);
 			esp_ble_gatts_create_attr_tab(hidd_le_gatt_db, gatts_if, HIDD_LE_IDX_NB, 0);
-			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
-			break;
-		case HIDD_LE_IDX_NB:
+		default:
+			//ESP_LOGE(TAG, "ESP_GATTS_CREAT_ATTR_TAB_EVT unknown handle %d", param->add_attr_tab.num_handle);
+		}
+		if (param->add_attr_tab.num_handle == HIDD_LE_IDX_NB && param->add_attr_tab.status == ESP_GATT_OK) {
 			memcpy(hidd_le_env.hidd_inst.att_tbl, param->add_attr_tab.handles, HIDD_LE_IDX_NB * sizeof(uint16_t));
 			ESP_LOGI(TAG, "hid svc handle = %x", hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
 			hid_add_id_tbl();
 			esp_ble_gatts_start_service(hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
-			break;
-		default:
-			ESP_LOGE(TAG, "ESP_GATTS_CREAT_ATTR_TAB_EVT unknown handle %d", param->add_attr_tab.num_handle);
+		} else {
+			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
 		}
+	case ESP_GATTS_READ_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_READ_EVT");
 		break;
-	default:
-		ESP_LOGI(TAG, "ESP_GATTS_UNKNOWN_EVT");
+	case ESP_GATTS_EXEC_WRITE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_EXEC_WRITE_EVT");
+		break;
+	case ESP_GATTS_MTU_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_MTU_EVT");
+		break;
+	case ESP_GATTS_UNREG_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_UNREG_EVT");
+		break;
+	case ESP_GATTS_ADD_INCL_SRVC_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_ADD_INCL_SRVC_EVT");
+		break;
+	case ESP_GATTS_ADD_CHAR_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_ADD_CHAR_EVT");
+		break;
+	case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_ADD_CHAR_DESCR_EVT");
+		break;
+	case ESP_GATTS_DELETE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_DELETE_EVT");
+		break;
+	case ESP_GATTS_START_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_START_EVT");
+		break;
+	case ESP_GATTS_STOP_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_STOP_EVT");
+		break;
+	case ESP_GATTS_OPEN_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_OPEN_EVT");
+		break;
+	case ESP_GATTS_CANCEL_OPEN_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CANCEL_OPEN_EVT");
+		break;
+	case ESP_GATTS_LISTEN_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_LISTEN_EVT");
+		break;
+	case ESP_GATTS_CONGEST_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CONGEST_EVT");
+		break;
+	case ESP_GATTS_RESPONSE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_RESPONSE_EVT");
+		break;
+	case ESP_GATTS_SET_ATTR_VAL_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_SET_ATTR_VAL_EVT");
+		break;
+	case ESP_GATTS_SEND_SERVICE_CHANGE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_SEND_SERVICE_CHANGE_EVT");
+		break;
 	}
-
 }
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -204,6 +255,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 		ESP_LOGI(TAG, "pair status = %s", param->ble_security.auth_cmpl. success ? "success" : "fail");
 		if (!param->ble_security.auth_cmpl.success) {
 			ESP_LOGE(TAG, "fail reason = 0x%x", param->ble_security.auth_cmpl.fail_reason);
+			break;
 		}
 		vTaskDelay(pdMS_TO_TICKS(50));
 		sec_conn = true;
@@ -218,10 +270,10 @@ adc_continuous_handle_t adc = NULL;
 
 typedef struct {
 	int ch;
-	int hid;
-} keymap;
+	uint8_t hid;
+} Key;
 
-const keymap qwerty[] = {
+const Key qwerty[] = {
 	{ '0',  HID_KEY_0,                },
 	{ 'p',  HID_KEY_P,                },
 	{ ';',  HID_KEY_SEMI_COLON,       },
@@ -271,7 +323,7 @@ void listen_adc(void *pvParameters)
 	int i, j;
 	int n, m;
 	adc_digi_output_data_t buf[LENGTH(channels)];
-	uint8_t c;
+	Key *key;
 	adc_digi_output_data_t *p;
 	esp_err_t ret;
 
@@ -306,38 +358,87 @@ void listen_adc(void *pvParameters)
 		return;
 	}
 
-	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(50))) {
-		if (!sec_conn) {
-			j = -1;
-			continue;
-		}
-
+	uint16_t item[6];
+	for (j = 0;; j++) {
 		if (adc_continuous_start(adc) != ESP_OK) {
 			ESP_LOGI(TAG, "failed to start ADC");
-			continue;
+			return;
 		}
 
 		if ((ret = adc_continuous_read(adc, (uint8_t*)buf, sizeof(buf), (uint32_t*)(&n), 10)) != ESP_OK) {
-			ESP_LOGI(TAG, "arf: %d %d", n, ret);
+			//ESP_LOGI(TAG, "arf: %d %d", n, ret);
 			adc_continuous_stop(adc);
 			continue;
 		} else if (1 || j == 0) {
 			//ESP_LOGI(TAG, "read %d from adc", n);
 		}
 
-		if (adc_continuous_stop(adc) != ESP_OK) {
-			ESP_LOGI(TAG, "failed to stop ADC");
+		adc_continuous_stop(adc);
+
+		for (i = 0; i < LENGTH(item); i++) {
+			item[i] = buf[i].type2.data;
 		}
 
-		n = buf[4].type2.data;
-		m = buf[5].type2.data;
-		lv_label_set_text(l1, str);
-		char txt[12];
-		sprintf(txt, "%d %d", n, m);
+		if (j%20) {
+			continue;
+		}
+
+		for (i=0; i < LENGTH(channels); i++) {
+			n = buf[i].type2.data;
+			//ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
+
+			n = item[i];
+
+			if (n < 2150 || n > 3000) {
+				str[i] = ' ';
+				continue;
+			}
+			n = (n-2150)/75;
+			n = MIN(n, 4);
+			key = &qwerty[(i*4)+n+(left?24:0)];
+			//ESP_LOGI(TAG, "sending event: %c\n", key->ch);
+
+			xQueueSend(KeyboardQueue, &key, ~0);
+		}
+	}
+	adc_continuous_stop(adc);
+	adc_continuous_deinit(adc);
+
+}
+
+void draw(void *pvParameters)
+{
+	int i;
+	char txt[24] = {};
+	if (!lvgl_port_lock(0)) {
+		ESP_LOGI(TAG, "failed to lock LVGL port");
+		return;
+	}
+	for (i = 0;; i++, vTaskDelay(pdMS_TO_TICKS(50))) {
+		//xQueueReceive(KeyboardQueue, item, ~0);
+		//lv_label_set_text(l1, str);
+		sprintf(txt, "%d %d", i, i);
 		lv_label_set_text(l2, txt);
 		lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
 		lv_obj_align(l2, LV_ALIGN_TOP_LEFT, 128/2, 0);
 
+	}
+	lvgl_port_unlock();
+
+	esp_lcd_panel_disp_on_off(panel, false);
+}
+
+void bluetooth_send(void *pvParameters)
+{
+	int i, j, n, m;
+	Key *key;
+	uint8_t c;
+
+	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(10))) {
+		xQueueReceive(KeyboardQueue, &key, ~0);
+		/*
+		n = item[4];
+		m = item[5];
 		if (n >= 1900 && n <= 2100) {
 			n = 0;
 		} else {
@@ -353,53 +454,27 @@ void listen_adc(void *pvParameters)
 		if (n == 0 && m == 0) {
 			// ok
 		} else if (esp_hidd_send_mouse_value(hid_conn_id, 0, (int8_t)-m, (int8_t)n)) {
-			ESP_LOGI(TAG, "failed to send mouse value");
+			ESP_LOGE(TAG, "failed to send mouse value");
+		}
+		*/
+
+		if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 1)) {
+			//sec_conn = false;
+			ESP_LOGI(TAG, "failed sending key");
 		}
 
-		// digits
-		for (i = 0; i < 4; i++) {
-			n = buf[i].type2.data;
-
-			if (j % 20 == 0) {
-				ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
-			}
-
-			if (n < 2150 || n > 3000) {
-				str[i] = ' ';
-				continue;
-			}
-			n = (n-2150)/75;
-			n = MIN(n, 4);
-			c = qwerty[(i*4)+n+(left?24:0)].hid;
-			str[i] = qwerty[(i*4)+n+(left?24:0)].ch;
-			ESP_LOGI(TAG, "sending key: %d\n", c);
-			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 1)) {
-				sec_conn = false;
-				ESP_LOGI(TAG, "failed sending up");
-				j = 0;
-				continue;
-			}
-			if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &c, 0)) {
-				sec_conn = false;
-				ESP_LOGI(TAG, "failed down");
-				j = 0;
-				continue;
-			}
+		if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 0)) {
+			sec_conn = false;
+			ESP_LOGI(TAG, "failed down");
+			j = 0;
+			continue;
 		}
 
 		if (j%20) {
 			continue;
 		}
 
-		for (i=0; i < LENGTH(channels); i++) {
-			n = buf[i].type2.data;
-			ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
-		}
 	}
-	esp_lcd_panel_disp_on_off(panel, false);
-	adc_continuous_stop(adc);
-	adc_continuous_deinit(adc);
-
 }
 
 void app_main(void)
@@ -407,6 +482,24 @@ void app_main(void)
 	esp_err_t ret;
 	int i;
 	uint8_t key_size, init_key, rsp_key;
+
+	KeyboardQueue = xQueueCreate(1, sizeof(Key*));
+	if (KeyboardQueue == NULL) {
+		ESP_LOGI(TAG, "failed create input queue");
+		return;
+	}
+
+	MouseQueue = xQueueCreate(64, sizeof(uint16_t)*6);
+	if (MouseQueue == NULL) {
+		ESP_LOGI(TAG, "failed create input queue");
+		return;
+	}
+
+	NetworkQueue = xQueueCreate(64, sizeof(uint16_t)*6);
+	if (NetworkQueue == NULL) {
+		ESP_LOGI(TAG, "failed create input queue");
+		return;
+	}
 
 	ESP_LOGI(TAG, "Initialize I2C bus");
 	i2c_master_bus_handle_t i2c_bus = NULL;
@@ -563,5 +656,6 @@ void app_main(void)
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY,     &rsp_key,  sizeof(rsp_key));
 
 	xTaskCreate(&listen_adc, "listen_adc", 2048<<1, NULL, 5, NULL);
-
+	//xTaskCreate(&draw, "draw", 2048<<1, NULL, 5, NULL);
+	xTaskCreate(&bluetooth_send, "bluetooth_send", 2048<<1, NULL, 5, NULL);
 }
