@@ -36,8 +36,6 @@ struct prf_char_pres_fmt {
 
 // HID report mapping table
 static hid_report_map_t hid_rpt_map[HID_NUM_REPORTS];
-static hid_report_map_t *hid_dev_rpt_tbl;
-static uint8_t hid_dev_rpt_tbl_Len;
 
 // HID Report Map characteristic value
 // Keyboard report descriptor (using format for Boot interface descriptor)
@@ -637,10 +635,6 @@ void hid_add_id_tbl(void)
 	hid_rpt_map[7].handle = hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_VAL];
 	hid_rpt_map[7].cccdHandle = 0;
 	hid_rpt_map[7].mode = HID_PROTOCOL_MODE_REPORT;
-
-	// Setup report ID map
-	hid_dev_rpt_tbl = hid_rpt_map;
-	hid_dev_rpt_tbl_Len = HID_NUM_REPORTS;
 }
 
 esp_err_t esp_hidd_profile_init(void)
@@ -783,9 +777,9 @@ void hidd_get_attr_value(uint16_t handle, uint16_t *length, uint8_t **value)
 
 static hid_report_map_t *hid_dev_rpt_by_id(uint8_t id, uint8_t type)
 {
-	hid_report_map_t *rpt = hid_dev_rpt_tbl;
+	hid_report_map_t *rpt = hid_rpt_map;
 
-	for (uint8_t i = hid_dev_rpt_tbl_Len; i > 0; i--, rpt++) {
+	for (uint8_t i = HID_NUM_REPORTS; i > 0; i--, rpt++) {
 		if (rpt->id == id && rpt->type == type && rpt->mode == hidProtocolMode) {
 			return rpt;
 		}
