@@ -186,7 +186,7 @@ const keymap qwerty[] = {
 	{ 'M',  HID_KEY_M,                },
 };
 
-void hid_task(void *pvParameters)
+void listen_adc(void *pvParameters)
 {
 	int i, j;
 	int n, m;
@@ -464,6 +464,6 @@ void app_main(void)
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY,    &init_key, sizeof(init_key));
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY,     &rsp_key,  sizeof(rsp_key));
 
-	xTaskCreate(&hid_task, "hid_task", 2048<<1, NULL, 5, NULL);
+	xTaskCreate(&listen_adc, "listen_adc", 2048<<1, NULL, 5, NULL);
 
 }
