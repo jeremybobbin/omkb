@@ -21,18 +21,6 @@
 #define HI_UINT16(a) (((a) >> 8) & 0xFF)
 #define LO_UINT16(a) ((a) & 0xFF)
 
-/// Battery Service Attributes Indexes
-enum {
-	BAS_IDX_SVC,
-
-	BAS_IDX_BATT_LVL_CHAR,
-	BAS_IDX_BATT_LVL_VAL,
-	BAS_IDX_BATT_LVL_NTF_CFG,
-	BAS_IDX_BATT_LVL_PRES_FMT,
-
-	BAS_IDX_NB,
-};
-
 struct prf_char_pres_fmt {
 	/// Unit (The Unit is a UUID)
 	uint16_t unit;
@@ -260,7 +248,7 @@ static const uint16_t char_format_uuid = ESP_GATT_UUID_CHAR_PRESENT_FORMAT;
 
 static uint8_t battary_lev = 50;
 /// Full HRS Database Description - Used to add attributes into the database
-static const esp_gatts_attr_db_t bas_att_db[BAS_IDX_NB] = {
+const esp_gatts_attr_db_t bas_att_db[BAS_IDX_NB] = {
 	// Battary Service Declaration
 	[BAS_IDX_SVC] = {{ESP_GATT_AUTO_RSP},
 			 {ESP_UUID_LEN_16, (uint8_t *) & primary_service_uuid,
@@ -297,7 +285,7 @@ static const esp_gatts_attr_db_t bas_att_db[BAS_IDX_NB] = {
 };
 
 /// Full Hid device Database Description - Used to add attributes into the database
-static esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
+esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
 	// HID Service Declaration
 	[HIDD_LE_IDX_SVC] = {{ESP_GATT_AUTO_RSP},
 			     {ESP_UUID_LEN_16, (uint8_t *) & primary_service_uuid,
@@ -589,7 +577,7 @@ static esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB] = {
 					},
 };
 
-static void hid_add_id_tbl(void)
+void hid_add_id_tbl(void)
 {
 	// Mouse input report
 	hid_rpt_map[0].id = hidReportRefMouseIn[0];
@@ -652,136 +640,6 @@ static void hid_add_id_tbl(void)
 
 	// Setup report ID map
 	hid_dev_register_reports(HID_NUM_REPORTS, hid_rpt_map);
-}
-
-uint16_t gatts_interface = ESP_GATT_IF_NONE;
-
-static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
-{
-
-	switch (event) {
-	case ESP_GATTS_REG_EVT:{
-			if (param->reg.status != ESP_GATT_OK) {
-				ESP_LOGI(HID_LE_PRF_TAG, "app registration failed, app_id %04x, status %d", param->reg.app_id, param->reg.status);
-				return;
-			}
-			gatts_interface = gatts_if;
-			esp_ble_gap_config_local_icon(ESP_BLE_APPEARANCE_GENERIC_HID);
-			esp_hidd_cb_param_t hidd_param;
-			hidd_param.init_finish.state = param->reg.status;
-			if (param->reg.app_id == HIDD_APP_ID) {
-				hidd_le_env.gatt_if = gatts_if;
-				if (hidd_le_env.hidd_cb != NULL) {
-					(hidd_le_env.hidd_cb) (ESP_HIDD_EVENT_REG_FINISH, &hidd_param);
-					/* Here should added the battery service first, because the hid service should include the battery service.
-					   After finish to added the battery service then can added the hid service. */
-					esp_ble_gatts_create_attr_tab(bas_att_db, gatts_if, BAS_IDX_NB, 0);
-				}
-			}
-			if (param->reg.app_id == BATTRAY_APP_ID) {
-				hidd_param.init_finish.gatts_if = gatts_if;
-				if (hidd_le_env.hidd_cb != NULL) {
-					(hidd_le_env.hidd_cb) (ESP_BAT_EVENT_REG, &hidd_param);
-				}
-
-			}
-
-			break;
-		}
-	case ESP_GATTS_CONF_EVT:{
-			break;
-		}
-	case ESP_GATTS_CREATE_EVT:
-		break;
-	case ESP_GATTS_CONNECT_EVT:{
-			esp_hidd_cb_param_t cb_param = { 0 };
-			ESP_LOGI(HID_LE_PRF_TAG, "HID connection establish, conn_id = %x", param->connect.conn_id);
-			memcpy(cb_param.connect.remote_bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-			cb_param.connect.conn_id = param->connect.conn_id;
-			hidd_clcb_alloc(param->connect.conn_id, param->connect.remote_bda);
-			esp_ble_set_encryption(param->connect.remote_bda, ESP_BLE_SEC_ENCRYPT_NO_MITM);
-			if (hidd_le_env.hidd_cb != NULL) {
-				(hidd_le_env.hidd_cb) (ESP_HIDD_EVENT_BLE_CONNECT, &cb_param);
-			}
-			break;
-		}
-	case ESP_GATTS_DISCONNECT_EVT:{
-			if (hidd_le_env.hidd_cb != NULL) {
-				(hidd_le_env.hidd_cb) (ESP_HIDD_EVENT_BLE_DISCONNECT, NULL);
-			}
-			hidd_clcb_dealloc(param->disconnect.conn_id);
-			break;
-		}
-	case ESP_GATTS_CLOSE_EVT:
-		break;
-	case ESP_GATTS_WRITE_EVT:{
-			esp_hidd_cb_param_t cb_param = { 0 };
-			if (param->write.handle == hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_LED_OUT_VAL]) {
-				cb_param.led_write.conn_id = param->write.conn_id;
-				cb_param.led_write.report_id = HID_RPT_ID_LED_OUT;
-				cb_param.led_write.length = param->write.len;
-				cb_param.led_write.data = param->write.value;
-				(hidd_le_env.hidd_cb)
-				    (ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT, &cb_param);
-			}
-			if (param->write.handle == hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_VENDOR_OUT_VAL]
-			    && hidd_le_env.hidd_cb != NULL) {
-				cb_param.vendor_write.conn_id = param->write.conn_id;
-				cb_param.vendor_write.report_id = HID_RPT_ID_VENDOR_OUT;
-				cb_param.vendor_write.length = param->write.len;
-				cb_param.vendor_write.data = param->write.value;
-				(hidd_le_env.hidd_cb)
-				    (ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT, &cb_param);
-			}
-			break;
-		}
-	case ESP_GATTS_CREAT_ATTR_TAB_EVT:{
-			if (param->add_attr_tab.num_handle == BAS_IDX_NB &&
-			    param->add_attr_tab.svc_uuid.uuid.uuid16 == ESP_GATT_UUID_BATTERY_SERVICE_SVC && param->add_attr_tab.status == ESP_GATT_OK) {
-				incl_svc.start_hdl = param->add_attr_tab.handles[BAS_IDX_SVC];
-				incl_svc.end_hdl = incl_svc.start_hdl + BAS_IDX_NB - 1;
-				ESP_LOGI(HID_LE_PRF_TAG,
-					 "%s(), start added the hid service to the stack database. incl_handle = %d", __func__, incl_svc.start_hdl);
-				esp_ble_gatts_create_attr_tab(hidd_le_gatt_db, gatts_if, HIDD_LE_IDX_NB, 0);
-			}
-			if (param->add_attr_tab.num_handle == HIDD_LE_IDX_NB && param->add_attr_tab.status == ESP_GATT_OK) {
-				memcpy(hidd_le_env.hidd_inst.att_tbl, param->add_attr_tab.handles, HIDD_LE_IDX_NB * sizeof(uint16_t));
-				ESP_LOGI(HID_LE_PRF_TAG, "hid svc handle = %x", hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
-				hid_add_id_tbl();
-				esp_ble_gatts_start_service(hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
-			} else {
-				esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
-			}
-			break;
-		}
-
-	default:
-		break;
-	}
-
-}
-
-esp_err_t esp_hidd_register_callbacks(esp_hidd_event_cb_t callbacks)
-{
-	esp_err_t status;
-
-	if (callbacks == NULL) {
-		return ESP_FAIL;
-	}
-
-	hidd_le_env.hidd_cb = callbacks;
-
-	if ((status = esp_ble_gatts_register_callback(gatts_event_handler)) != ESP_OK) {
-		return status;
-	}
-
-	esp_ble_gatts_app_register(BATTRAY_APP_ID);
-
-	if ((status = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK) {
-		return status;
-	}
-
-	return status;
 }
 
 esp_err_t esp_hidd_profile_init(void)

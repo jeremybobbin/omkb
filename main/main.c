@@ -34,9 +34,11 @@
 #define LCD_PARAM_BITS               8
 
 static const char *TAG = "lask5";
-static int disconnects = 0;
+static volatile int disconnects = 0;
+static volatile uint16_t gatts_interface = ESP_GATT_IF_NONE;
 static volatile uint16_t hid_conn_id = 0;
 static volatile bool sec_conn = false;
+
 static char *str = "----\0";
 static lv_obj_t *l1 = NULL;
 static lv_obj_t *l2 = NULL;
@@ -86,47 +88,101 @@ static esp_ble_adv_params_t hidd_adv_params = {
 	//.peer_addr            =  { 0x80, 0x86, 0xF2, 0xD9, 0x8C, 0xAC },
 };
 
-static void hidd_event_callback(esp_hidd_cb_event_t event, esp_hidd_cb_param_t *param) {
-	switch (event) {
-	case ESP_HIDD_EVENT_REG_FINISH:
-		if (param->init_finish.state == ESP_HIDD_INIT_OK) {
-			esp_ble_gap_set_device_name("LASK-5 Keyboard");
-			esp_ble_gap_config_adv_data(&hidd_adv_data);
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
 
+	switch (event) {
+	case ESP_GATTS_REG_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_REG_EVT %d", param->reg.app_id);
+		if (param->reg.status != ESP_GATT_OK) {
+			ESP_LOGI(TAG, "app registration failed, app_id %04x, status %d", param->reg.app_id, param->reg.status);
+			break;
+		}
+		gatts_interface = gatts_if;
+		esp_ble_gap_config_local_icon(ESP_BLE_APPEARANCE_GENERIC_HID);
+
+		switch (param->reg.app_id) {
+		case HIDD_APP_ID:
+			hidd_le_env.gatt_if = gatts_if;
+			if (param->reg.status == 0) {
+				esp_ble_gap_set_device_name("LASK-5 Keyboard");
+				esp_ble_gap_config_adv_data(&hidd_adv_data);
+
+			}
+			/* Here should added the battery service first, because the hid service should include the battery service.
+			   After finish to added the battery service then can added the hid service. */
+			esp_ble_gatts_create_attr_tab(bas_att_db, gatts_if, BAS_IDX_NB, 0);
+			break;
+		case BATTRAY_APP_ID:
 		}
 		break;
-	case ESP_HIDD_EVENT_BLE_CONNECT:
-		ESP_LOGI(TAG, "ESP_HIDD_EVENT_BLE_CONNECT");
+	case ESP_GATTS_CONF_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CONF_EVT");
+		break;
+	case ESP_GATTS_CREATE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CREATE_EVT");
+		break;
+	case ESP_GATTS_CONNECT_EVT:
+		hidd_clcb_alloc(param->connect.conn_id, param->connect.remote_bda);
+		esp_ble_set_encryption(param->connect.remote_bda, ESP_BLE_SEC_ENCRYPT_NO_MITM);
 		hid_conn_id = param->connect.conn_id;
+		ESP_LOGI(TAG, "HID connection establish, conn_id = %x", param->connect.conn_id);
 		break;
-	case ESP_HIDD_EVENT_BLE_DISCONNECT:
+	case ESP_GATTS_DISCONNECT_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT %d", disconnects++);
 		sec_conn = false;
-		ESP_LOGI(TAG, "ESP_HIDD_EVENT_BLE_DISCONNECT %d", disconnects++);
 		esp_ble_gap_start_advertising(&hidd_adv_params);
+		hidd_clcb_dealloc(param->disconnect.conn_id);
 		break;
-	case ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT:
-		ESP_LOGI(TAG, "%s, ESP_HIDD_EVENT_BLE_VENDOR_REPORT_WRITE_EVT", __func__);
-		ESP_LOG_BUFFER_HEX(TAG, param->vendor_write.data, param->vendor_write.length);
+	case ESP_GATTS_CLOSE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CLOSE_EVT");
 		break;
-	case ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT:
-		ESP_LOGI(TAG, "ESP_HIDD_EVENT_BLE_LED_REPORT_WRITE_EVT");
-		ESP_LOG_BUFFER_HEX(TAG, param->led_write.data, param->led_write.length);
+	case ESP_GATTS_WRITE_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_WRITE_EVT %d", param->write.len);
+		if (param->write.handle == hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_LED_OUT_VAL]) {
+			ESP_LOG_BUFFER_HEX(TAG, param->write.value, param->write.len);
+		} else if (param->write.handle == hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_REPORT_VENDOR_OUT_VAL]) {
+			ESP_LOG_BUFFER_HEX(TAG, param->write.value, param->write.len);
+		}
 		break;
-	//case ESP_BAT_EVENT_REG:
-	//case ESP_HIDD_EVENT_DEINIT_FINISH:
+	case ESP_GATTS_CREAT_ATTR_TAB_EVT:
+		ESP_LOGI(TAG, "ESP_GATTS_CREAT_ATTR_TAB_EVT");
+		if (param->add_attr_tab.status != ESP_GATT_OK) {
+			ESP_LOGE(TAG, "ESP_GATTS_CREAT_ATTR_TAB_EVT returned %d", param->add_attr_tab.status);
+		}
+		switch (param->add_attr_tab.num_handle) {
+		case BAS_IDX_NB:
+			incl_svc.start_hdl = param->add_attr_tab.handles[BAS_IDX_SVC];
+			incl_svc.end_hdl = incl_svc.start_hdl + BAS_IDX_NB - 1;
+			ESP_LOGI(TAG, "start added the hid service to the stack database. incl_handle = %d", incl_svc.start_hdl);
+			esp_ble_gatts_create_attr_tab(hidd_le_gatt_db, gatts_if, HIDD_LE_IDX_NB, 0);
+			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
+			break;
+		case HIDD_LE_IDX_NB:
+			memcpy(hidd_le_env.hidd_inst.att_tbl, param->add_attr_tab.handles, HIDD_LE_IDX_NB * sizeof(uint16_t));
+			ESP_LOGI(TAG, "hid svc handle = %x", hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
+			hid_add_id_tbl();
+			esp_ble_gatts_start_service(hidd_le_env.hidd_inst.att_tbl[HIDD_LE_IDX_SVC]);
+			break;
+		default:
+			ESP_LOGE(TAG, "ESP_GATTS_CREAT_ATTR_TAB_EVT unknown handle %d", param->add_attr_tab.num_handle);
+		}
+		break;
 	default:
-		break;
+		ESP_LOGI(TAG, "ESP_GATTS_UNKNOWN_EVT");
 	}
-	return;
+
 }
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
 	switch (event) {
 	case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
+		ESP_LOGI(TAG, "ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT");
 		esp_ble_gap_start_advertising(&hidd_adv_params);
 		//sec_conn = false;
 		break;
 	case ESP_GAP_BLE_SEC_REQ_EVT:
+		ESP_LOGI(TAG, "ESP_GAP_BLE_SEC_REQ_EVT");
 		for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
 			ESP_LOGD(TAG, "%x:", param->ble_security.ble_req.bd_addr[i]);
 		}
@@ -134,6 +190,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 		//sec_conn = false;
 		break;
 	case ESP_GAP_BLE_AUTH_CMPL_EVT:
+		ESP_LOGI(TAG, "ESP_GAP_BLE_AUTH_CMPL_EVT");
 		esp_bd_addr_t bd_addr;
 		memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
 		ESP_LOGI(TAG, "remote BD_ADDR: %08x%04x",
@@ -150,6 +207,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 		sec_conn = true;
 		break;
 	default:
+		ESP_LOGI(TAG, "ESP_GAP_UNKNOWN_EVT");
 		break;
 	}
 }
@@ -322,16 +380,6 @@ void app_main(void)
 	int i;
 	uint8_t key_size, init_key, rsp_key;
 
-	// Initialize NVS.
-	ret = nvs_flash_init();
-	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-		ESP_ERROR_CHECK(nvs_flash_erase());
-		ret = nvs_flash_init();
-	}
-
-	ESP_ERROR_CHECK(ret);
-	ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
-
 	ESP_LOGI(TAG, "Initialize I2C bus");
 	i2c_master_bus_handle_t i2c_bus = NULL;
 	i2c_master_bus_config_t bus_config = {
@@ -417,6 +465,20 @@ void app_main(void)
 	lv_obj_align(l1, LV_ALIGN_TOP_LEFT, disp->driver->hor_res/2, 0);
 	lvgl_port_unlock();
 
+	// Initialize NVS.
+	ESP_LOGI(TAG, "initalizing NVS");
+	ret = nvs_flash_init();
+	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+		ESP_ERROR_CHECK(nvs_flash_erase());
+		ret = nvs_flash_init();
+	}
+
+	ESP_ERROR_CHECK(ret);
+
+	ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+
+	ESP_LOGI(TAG, "initalizing bluetooth");
 	esp_bt_controller_config_t bt = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 	if ((ret = esp_bt_controller_init(&bt))) {
 		ESP_LOGE(TAG, "%s initialize controller failed",
@@ -445,7 +507,21 @@ void app_main(void)
 	}
 
 	esp_ble_gap_register_callback(gap_event_handler);
-	esp_hidd_register_callbacks(hidd_event_callback);
+
+	if ((ret = esp_ble_gatts_register_callback(gatts_event_handler)) != ESP_OK) {
+		ESP_LOGE(TAG, "init bluedroid failed");
+		return;
+	}
+
+	if ((ret = esp_ble_gatts_app_register(BATTRAY_APP_ID)) != ESP_OK) {
+		ESP_LOGE(TAG, "init battray app failed");
+		return;
+	}
+
+	if ((ret = esp_ble_gatts_app_register(HIDD_APP_ID)) != ESP_OK) {
+		ESP_LOGE(TAG, "init hidd app failed");
+		return;
+	}
 
 	esp_ble_auth_req_t auth_req = ESP_LE_AUTH_BOND;
 	esp_ble_io_cap_t   iocap    = ESP_IO_CAP_NONE;

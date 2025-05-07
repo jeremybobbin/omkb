@@ -289,6 +289,19 @@
 #define HID_CC_RPT_SET_SELECTION(s, x)  (s)[1] &= HID_CC_RPT_SELECTION_BITS; \
                                         (s)[1] |= ((x) & 0x03) << 4
 
+/// Battery Service Attributes Indexes
+enum {
+	BAS_IDX_SVC,
+
+	BAS_IDX_BATT_LVL_CHAR,
+	BAS_IDX_BATT_LVL_VAL,
+	BAS_IDX_BATT_LVL_NTF_CFG,
+	BAS_IDX_BATT_LVL_PRES_FMT,
+
+	BAS_IDX_NB,
+};
+
+
 typedef enum {
 	ESP_HIDD_EVENT_REG_FINISH = 0,
 	ESP_BAT_EVENT_REG,
@@ -563,6 +576,15 @@ typedef struct {
 
 extern hidd_le_env_t hidd_le_env;
 extern uint8_t hidProtocolMode;
+
+extern esp_gatts_attr_db_t hidd_le_gatt_db[HIDD_LE_IDX_NB];
+extern const esp_gatts_attr_db_t bas_att_db[BAS_IDX_NB];
+extern esp_gatts_incl_svc_desc_t incl_svc;
+
+void hid_add_id_tbl(void);
+
+
+
 
 void hidd_clcb_alloc(uint16_t conn_id, esp_bd_addr_t bda);
 bool hidd_clcb_dealloc(uint16_t conn_id);
