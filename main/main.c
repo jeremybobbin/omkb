@@ -1,30 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "driver/i2c_master.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_device.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_event.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gatt_defs.h"
-#include "esp_gatts_api.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
-#include "hid_dev.h"
-#include "nvs_flash.h"
-#include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
-#include "driver/i2c_master.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "hid_dev.h"
 #include "lvgl.h"
-
-#include "sdkconfig.h"
+#include "nvs_flash.h"
 
 #define LENGTH(x)  ((int)(sizeof (x) / sizeof *(x)))
 #define MIN(a, b)  ((a) > (b) ? (b) : (a))
