@@ -12,12 +12,10 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include "lvgl.h"
 #include "nvs_flash.h"
 
 #include "hid.h"
@@ -43,8 +41,6 @@ static volatile bool sec_conn = false;
 static bool left = 1;
 
 static char *str = "----\0";
-static lv_obj_t *l1 = NULL;
-static lv_obj_t *l2 = NULL;
 
 static esp_lcd_panel_handle_t panel = NULL;
 
@@ -410,20 +406,11 @@ void draw(void *pvParameters)
 {
 	int i;
 	char txt[24] = {};
-	if (!lvgl_port_lock(0)) {
-		ESP_LOGI(TAG, "failed to lock LVGL port");
-		return;
-	}
 	for (i = 0;; i++, vTaskDelay(pdMS_TO_TICKS(50))) {
 		//xQueueReceive(KeyboardQueue, item, ~0);
-		//lv_label_set_text(l1, str);
 		sprintf(txt, "%d %d", i, i);
-		lv_label_set_text(l2, txt);
-		lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
-		lv_obj_align(l2, LV_ALIGN_TOP_LEFT, 128/2, 0);
 
 	}
-	lvgl_port_unlock();
 
 	esp_lcd_panel_disp_on_off(panel, false);
 }
@@ -548,43 +535,8 @@ void app_main(void)
 	ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
 	ESP_LOGI(TAG, "Initialize LVGL");
-	const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-	lvgl_port_init(&lvgl_cfg);
-
-	const lvgl_port_display_cfg_t disp_cfg = {
-		.io_handle = io_handle,
-		.panel_handle = panel,
-		.buffer_size = LCD_WIDTH * LCD_HEIGHT,
-		.double_buffer = true,
-		.hres = LCD_WIDTH,
-		.vres = LCD_HEIGHT,
-		.monochrome = true,
-		.rotation = {
-			.swap_xy = false,
-			.mirror_x = false,
-			.mirror_y = false,
-		}
-	};
-	lv_disp_t *disp = lvgl_port_add_disp(&disp_cfg);
-
-	/* Rotation of the screen */
-	lv_disp_set_rotation(disp, LV_DISP_ROT_NONE);
 
 	ESP_LOGI(TAG, "Display LVGL Scroll Text");
-	// Lock the mutex due to the LVGL APIs are not thread-safe
-	if (!lvgl_port_lock(0)) {
-		ESP_LOGI(TAG, "failed to lock LVGL port");
-		return;
-	}
-
-	lv_obj_t *scr = lv_disp_get_scr_act(disp);
-	l1 = lv_label_create(scr);
-	l2 = lv_label_create(scr);
-	lv_obj_set_width(l1, disp->driver->hor_res/2);
-	lv_obj_set_width(l2,    disp->driver->hor_res/2);
-	lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, 0);
-	lv_obj_align(l1, LV_ALIGN_TOP_LEFT, disp->driver->hor_res/2, 0);
-	lvgl_port_unlock();
 
 	// Initialize NVS.
 	ESP_LOGI(TAG, "initalizing NVS");
