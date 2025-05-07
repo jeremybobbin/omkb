@@ -27,6 +27,14 @@
 #define W                          128
 #define H                           32
 
+// display
+static char *str = "----\0";
+
+static esp_lcd_panel_handle_t panel = NULL;
+
+static QueueHandle_t KeyboardQueue, MouseQueue, NetworkQueue;
+
+// bluetooth
 static const char *TAG = "lask5";
 static volatile int disconnects = 0;
 static volatile uint16_t gatts_interface = ESP_GATT_IF_NONE;
@@ -34,29 +42,14 @@ static volatile uint16_t hid_conn_id = 0;
 static volatile bool sec_conn = false;
 static bool left = 1;
 
-static char *str = "----\0";
-
-static esp_lcd_panel_handle_t panel = NULL;
-
-static QueueHandle_t KeyboardQueue, MouseQueue, NetworkQueue;
-
-static adc_channel_t channels[] = {
-	ADC_CHANNEL_0,
-	ADC_CHANNEL_1,
-	ADC_CHANNEL_2,
-	ADC_CHANNEL_3,
-	ADC_CHANNEL_4,
-	ADC_CHANNEL_5,
-};
-
-static uint8_t hidd_service_uuid128[] = {
+static uint8_t service_id[] = {
 	0xfb, 0x34, 0x9b, 0x5f,
 	0x80, 0x00, 0x00, 0x80,
 	0x00, 0x10, 0x00, 0x00,
 	0x12, 0x18, 0x00, 0x00,
 };
 
-static esp_ble_adv_data_t hidd_adv_data = {
+static esp_ble_adv_data_t advert = {
 	.set_scan_rsp = false,
 	.include_name = true,
 	.include_txpower = true,
@@ -67,21 +60,30 @@ static esp_ble_adv_data_t hidd_adv_data = {
 	.p_manufacturer_data = NULL,
 	.service_data_len = 0,
 	.p_service_data = NULL,
-	.service_uuid_len = sizeof(hidd_service_uuid128),
-	.p_service_uuid = hidd_service_uuid128,
+	.service_uuid_len = sizeof(service_id),
+	.p_service_uuid = service_id,
 	.flag = 0x6,
 };
 
-static esp_ble_adv_params_t hidd_adv_params = {
+static esp_ble_adv_params_t advert_config = {
 	.adv_type             =  ADV_TYPE_IND,
 	.own_addr_type        =  BLE_ADDR_TYPE_PUBLIC,
 	.channel_map          =  ADV_CHNL_ALL,
 	.adv_filter_policy    =  ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-	//.peer_addr_type       =  0,
 	.adv_int_min          =  0x20,
 	.adv_int_max          =  0x30,
-	//.peer_addr            =  { 0x80, 0x86, 0xF2, 0xD9, 0x8C, 0xAC },
 };
+
+// adc
+static adc_channel_t channels[] = {
+	ADC_CHANNEL_0,
+	ADC_CHANNEL_1,
+	ADC_CHANNEL_2,
+	ADC_CHANNEL_3,
+	ADC_CHANNEL_4,
+	ADC_CHANNEL_5,
+};
+
 
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
 	switch (event) {
@@ -99,7 +101,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 			hidd_le_env.gatt_if = gatts_if;
 			if (param->reg.status == 0) {
 				esp_ble_gap_set_device_name("LASK-5 Keyboard");
-				esp_ble_gap_config_adv_data(&hidd_adv_data);
+				esp_ble_gap_config_adv_data(&advert);
 
 			}
 			/* Here should added the battery service first, because the hid service should include the battery service.
@@ -124,7 +126,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 	case ESP_GATTS_DISCONNECT_EVT:
 		ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT %d", disconnects++);
 		sec_conn = false;
-		esp_ble_gap_start_advertising(&hidd_adv_params);
+		esp_ble_gap_start_advertising(&advert_config);
 		hidd_clcb_dealloc(param->disconnect.conn_id);
 		break;
 	case ESP_GATTS_CLOSE_EVT:
@@ -221,7 +223,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 	switch (event) {
 	case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
 		ESP_LOGI(TAG, "ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT");
-		esp_ble_gap_start_advertising(&hidd_adv_params);
+		esp_ble_gap_start_advertising(&advert_config);
 		//sec_conn = false;
 		break;
 	case ESP_GAP_BLE_SEC_REQ_EVT:
