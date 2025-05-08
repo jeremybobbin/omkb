@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
 #include "driver/i2c_master.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_bt_defs.h"
@@ -314,14 +316,14 @@ void listen_adc(void *pvParameters)
 {
 	int i, j;
 	int n, m;
-	adc_digi_output_data_t buf[LENGTH(channels)];
+	uint8_t buf[LENGTH(channels)*SOC_ADC_DIGI_RESULT_BYTES*32];
 	Key *key;
-	adc_digi_output_data_t *p;
+	adc_digi_output_data_t *bp;
 	esp_err_t ret;
 
 	adc_continuous_handle_cfg_t adc_config = {
-		.max_store_buf_size = sizeof(buf)*22,
-		.conv_frame_size = sizeof(buf),
+		.max_store_buf_size = sizeof(buf)*4,
+		.conv_frame_size = sizeof(buf)*1,
 	};
 
 	adc_digi_pattern_config_t adc_pattern[LENGTH(channels)];
@@ -351,34 +353,44 @@ void listen_adc(void *pvParameters)
 	}
 
 	uint16_t item[6];
+	uint64_t conv[LENGTH(channels)];
 	for (j = 0;; j++) {
 		if (adc_continuous_start(adc) != ESP_OK) {
 			ESP_LOGI(TAG, "failed to start ADC");
 			return;
 		}
 
-		if ((ret = adc_continuous_read(adc, (uint8_t*)buf, sizeof(buf), (uint32_t*)(&n), 10)) != ESP_OK) {
+		if ((ret = adc_continuous_read(adc, buf, sizeof(buf), (uint32_t*)(&n), 50)) != ESP_OK) {
 			//ESP_LOGI(TAG, "arf: %d %d", n, ret);
 			adc_continuous_stop(adc);
 			continue;
 		} else if (1 || j == 0) {
-			//ESP_LOGI(TAG, "read %d from adc", n);
+			ESP_LOGI(TAG, "read %d from adc", n);
 		}
 
 		adc_continuous_stop(adc);
 
-		for (i = 0; i < LENGTH(item); i++) {
-			item[i] = buf[i].type2.data;
+		memset(conv, 0, sizeof(conv));
+		memset(item, 0, sizeof(item));
+		for (i = 0; i < n; i += SOC_ADC_DIGI_RESULT_BYTES) {
+			bp = (void*) &buf[i];
+			conv[bp->type2.channel] += bp->type2.data;
+			item[bp->type2.channel]++;
 		}
+
+		for (i = 0; i < LENGTH(channels); i++) {
+			ESP_LOGI(TAG, "read %llu/%d from chan %d", conv[i], item[i], i);
+			item[i] = conv[i]/item[i];
+			ESP_LOGI(TAG, "%d", 0xffff&item[i]);
+		}
+
+		xQueueSend(DisplayQueue, item, ~0);
 
 		if (j%20) {
 			continue;
 		}
 
-		xQueueSend(DisplayQueue, item, ~0);
-
-		for (i=0; i < LENGTH(channels); i++) {
-			n = buf[i].type2.data;
+		for (i = 0; i < LENGTH(channels); i++) {
 			//ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
 
 			n = item[i];
@@ -392,7 +404,7 @@ void listen_adc(void *pvParameters)
 			key = &qwerty[(i*4)+n+(left?24:0)];
 			//ESP_LOGI(TAG, "sending event: %c\n", key->ch);
 
-			xQueueSend(KeyboardQueue, &key, ~0);
+			//xQueueSend(KeyboardQueue, &key, ~0);
 		}
 	}
 	adc_continuous_stop(adc);
@@ -402,23 +414,45 @@ void listen_adc(void *pvParameters)
 
 void draw(void *pvParameters)
 {
-	int i, j, k, m = 0;
-	uint32_t *bp, buf[W];
-	char txt[24] = {};
-	uint16_t items[4];
-
-	for (i = 0;; i++, vTaskDelay(pdMS_TO_TICKS(50))) {
+	int i, j;
+	uint8_t buf[512];
+	uint32_t n;
+	uint16_t items[8], min[8], max[8];
+	for (i = 0; i < 8; i++) {
+		items[i] = 0;
+		max[i] = 0;
+		min[i] = ~0;
+	}
+	esp_lcd_panel_swap_xy(panel, false);
+	esp_lcd_panel_set_gap(panel, 0, 0);
+	memset(buf, 0, sizeof(buf));
+	esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, &buf);
+	for (i = 0;; i++) {
 		xQueueReceive(DisplayQueue, items, ~0);
-
-		bp = &buf[i%LENGTH(buf)];
-		*bp = 0;
+		memset(buf, 0, sizeof(buf));
 		for (j = 0; j < LENGTH(items); j++) {
-			*bp |= 1<<MIN(H, items[j]/3000);
-		}
+			if (items[j] < min[j]) {
+				min[j] = items[j];
+			}
+			if (items[j] > max[j]) {
+				max[j] = items[j];
+			}
+			if (min[j] >= max[j]) {
+				continue;
+			}
 
-		for (j = 0; j < i && j < W; j--) {
-			esp_lcd_panel_draw_bitmap(panel, j, 0, j, H, &buf[(j-i)%LENGTH(buf)]);
+			n = items[j]-min[j];
+			n = MIN(31, (sqrt(n)*sqrt(max[j]-min[j])*H)/(max[j]-min[j]));
+
+			buf[((n/8)*8)+j] |= 1<<(n%8);
 		}
+		j = 0;
+
+		ESP_LOGI(TAG, "is: %d - buf: %u %u %u %u %u %u - min: %d, max %d, v: %lu", i, items[0], items[1], items[2], items[3], items[4], items[5], min[0], max[0], n);
+		if (esp_lcd_panel_draw_bitmap(panel, 0, 0, 8, H, &buf)) {
+			break;
+		}
+		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 
 	esp_lcd_panel_disp_on_off(panel, false);
@@ -479,7 +513,7 @@ void app_main(void)
 	int i;
 	uint8_t key_size, init_key, rsp_key;
 
-	DisplayQueue = xQueueCreate(1, sizeof(uint16_t)*4);
+	DisplayQueue = xQueueCreate(1, sizeof(uint16_t)*6);
 	if (DisplayQueue == NULL) {
 		ESP_LOGI(TAG, "failed create input queue");
 		return;
@@ -541,7 +575,7 @@ void app_main(void)
 	ESP_ERROR_CHECK(esp_lcd_new_panel_ssd1306(io_handle, &panel_config, &panel));
 
 	ESP_LOGI(TAG, "reset panel");
-	ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+	//ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
 
 	ESP_LOGI(TAG, "init panel");
 	ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
@@ -623,6 +657,6 @@ void app_main(void)
 	esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY,     &rsp_key,  sizeof(rsp_key));
 
 	xTaskCreate(&listen_adc, "listen_adc", 2048<<1, NULL, 5, NULL);
-	//xTaskCreate(&draw, "draw", 2048<<1, NULL, 5, NULL);
-	xTaskCreate(&bluetooth_send, "bluetooth_send", 2048<<1, NULL, 5, NULL);
+	xTaskCreate(&draw, "draw", 2048<<1, NULL, 5, NULL);
+	//xTaskCreate(&bluetooth_send, "bluetooth_send", 2048<<1, NULL, 5, NULL);
 }
