@@ -429,24 +429,23 @@ void draw(void *pvParameters)
 	esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, &buf);
 	for (;;) {
 		xQueueReceive(DisplayQueue, items, ~0);
-		//memset(buf, 0, sizeof(buf));
-		for (j = 0; j < 4; j++) {
-			if (items[j] < min[j]) {
-				min[j] = items[j];
+
+		for (i = 0; i < 4; i++) {
+			if (items[i] < min[i]) {
+				min[i] = items[i];
 			}
-			if (items[j] > max[j]) {
-				max[j] = items[j];
+			if (items[i] > max[i]) {
+				max[i] = items[i];
 			}
-			if (min[j] >= max[j]) {
+			if (min[i] >= max[i]) {
 				continue;
 			}
 
-			n = items[j]-min[j];
-			n = MIN((W/4), (sqrt(n)*sqrt(max[j]-min[j])*(W/4))/(max[j]-min[j]));
+			n = items[i]-min[i];
+			n = MIN((W/4), (sqrt(n)*sqrt(max[i]-min[i])*(W/4))/(max[i]-min[i]));
 
-			buf[0][n+(j*(W/4))] |= 1;
+			buf[0][n+(i*(W/4))] |= 1;
 		}
-		j = 0;
 
 		ESP_LOGI(TAG, "buf: %u %u %u %u %u %u - min: %d, max %d, v: %lu", items[0], items[1], items[2], items[3], items[4], items[5], min[0], max[0], n);
 		if (esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, buf)) {
