@@ -361,11 +361,8 @@ void listen_adc(void *pvParameters)
 		}
 
 		if ((ret = adc_continuous_read(adc, buf, sizeof(buf), (uint32_t*)(&n), 50)) != ESP_OK) {
-			//ESP_LOGI(TAG, "arf: %d %d", n, ret);
 			adc_continuous_stop(adc);
 			continue;
-		} else if (1 || j == 0) {
-			ESP_LOGI(TAG, "read %d from adc", n);
 		}
 
 		adc_continuous_stop(adc);
@@ -379,9 +376,7 @@ void listen_adc(void *pvParameters)
 		}
 
 		for (i = 0; i < LENGTH(channels); i++) {
-			ESP_LOGI(TAG, "read %llu/%d from chan %d", conv[i], item[i], i);
 			item[i] = conv[i]/item[i];
-			ESP_LOGI(TAG, "%d", 0xffff&item[i]);
 		}
 
 		xQueueSend(DisplayQueue, item, ~0);
@@ -416,7 +411,7 @@ void draw(void *pvParameters)
 {
 	int i, j;
 	uint8_t buf[4][128];
-	uint32_t n;
+	uint32_t n, m;
 	uint16_t items[8], min[8], max[8];
 	for (i = 0; i < 8; i++) {
 		items[i] = 0;
@@ -430,7 +425,8 @@ void draw(void *pvParameters)
 	for (;;) {
 		xQueueReceive(DisplayQueue, items, ~0);
 
-		for (i = 0; i < 4; i++) {
+		m = 0;
+		for (i = 0; i < 6; i++) {
 			if (items[i] < min[i]) {
 				min[i] = items[i];
 			}
@@ -442,24 +438,42 @@ void draw(void *pvParameters)
 			}
 
 			n = items[i]-min[i];
-			n = MIN((W/4), (sqrt(n)*sqrt(max[i]-min[i])*(W/4))/(max[i]-min[i]));
-
-			buf[0][n+(i*(W/4))] |= 1;
+			switch (i) {
+			case 0: case 1: case 2: case 3:
+				items[i] = MIN((W/8)-1, (sqrt(n)*sqrt(max[i]-min[i])*(W/8))/(max[i]-min[i]));
+				break;
+			case 4: case 5:
+				items[i] = MIN((H)-1, (n*(H))/(max[i]-min[i]));
+				break;
+			}
 		}
 
-		ESP_LOGI(TAG, "buf: %u %u %u %u %u %u - min: %d, max %d, v: %lu", items[0], items[1], items[2], items[3], items[4], items[5], min[0], max[0], n);
+		for (i = 0; i < 4; i++) {
+			n = items[i];
+			buf[0][n + (i*(W/8)) + (W/4)] |= 1;
+		}
+
+		for (i = 3; i >= 0; i--) {
+			memset(buf[i], 0, W/4);
+		}
+
+		n = items[4];
+		m = items[5];
+
+		buf[m/8][n] = 1<<(m%8);
+
 		if (esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, buf)) {
 			break;
 		}
 		for (i = 3; i >= 0; i--) {
-			for (j = 0; j < 128; j++) {
+			for (j = W/4; j < (W/4)*3; j++) {
 				buf[i][j] <<= 1;
 				if (i-1 >= 0) {
 					buf[i][j] |= buf[i-1][j]>>7;
 				}
 			}
 		}
-		vTaskDelay(pdMS_TO_TICKS(50));
+		vTaskDelay(pdMS_TO_TICKS(20));
 	}
 
 	esp_lcd_panel_disp_on_off(panel, false);
