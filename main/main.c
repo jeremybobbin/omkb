@@ -415,7 +415,7 @@ void listen_adc(void *pvParameters)
 void draw(void *pvParameters)
 {
 	int i, j;
-	uint8_t buf[512];
+	uint8_t buf[4][128];
 	uint32_t n;
 	uint16_t items[8], min[8], max[8];
 	for (i = 0; i < 8; i++) {
@@ -427,10 +427,10 @@ void draw(void *pvParameters)
 	esp_lcd_panel_set_gap(panel, 0, 0);
 	memset(buf, 0, sizeof(buf));
 	esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, &buf);
-	for (i = 0;; i++) {
+	for (;;) {
 		xQueueReceive(DisplayQueue, items, ~0);
-		memset(buf, 0, sizeof(buf));
-		for (j = 0; j < LENGTH(items); j++) {
+		//memset(buf, 0, sizeof(buf));
+		for (j = 0; j < 4; j++) {
 			if (items[j] < min[j]) {
 				min[j] = items[j];
 			}
@@ -442,15 +442,23 @@ void draw(void *pvParameters)
 			}
 
 			n = items[j]-min[j];
-			n = MIN(31, (sqrt(n)*sqrt(max[j]-min[j])*H)/(max[j]-min[j]));
+			n = MIN((W/4), (sqrt(n)*sqrt(max[j]-min[j])*(W/4))/(max[j]-min[j]));
 
-			buf[((n/8)*8)+j] |= 1<<(n%8);
+			buf[0][n+(j*(W/4))] |= 1;
 		}
 		j = 0;
 
-		ESP_LOGI(TAG, "is: %d - buf: %u %u %u %u %u %u - min: %d, max %d, v: %lu", i, items[0], items[1], items[2], items[3], items[4], items[5], min[0], max[0], n);
-		if (esp_lcd_panel_draw_bitmap(panel, 0, 0, 8, H, &buf)) {
+		ESP_LOGI(TAG, "buf: %u %u %u %u %u %u - min: %d, max %d, v: %lu", items[0], items[1], items[2], items[3], items[4], items[5], min[0], max[0], n);
+		if (esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, buf)) {
 			break;
+		}
+		for (i = 3; i >= 0; i--) {
+			for (j = 0; j < 128; j++) {
+				buf[i][j] <<= 1;
+				if (i-1 >= 0) {
+					buf[i][j] |= buf[i-1][j]>>7;
+				}
+			}
 		}
 		vTaskDelay(pdMS_TO_TICKS(50));
 	}
