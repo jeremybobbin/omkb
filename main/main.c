@@ -29,20 +29,26 @@
 #define W                          128
 #define H                           32
 
-// display
-static char *str = "----\0";
+typedef struct {
+	int ch;
+	uint8_t hid;
+} Key;
 
-static esp_lcd_panel_handle_t panel = NULL;
+// lask
+static const char *TAG = "lask5";
+static bool left = 1;
 
+// interprocess-communication
 static QueueHandle_t KeyboardQueue, MouseQueue, DisplayQueue, NetworkQueue;
 
+// display
+static esp_lcd_panel_handle_t panel = NULL;
+
 // bluetooth
-static const char *TAG = "lask5";
 static volatile int disconnects = 0;
 static volatile uint16_t gatts_interface = ESP_GATT_IF_NONE;
 static volatile uint16_t hid_conn_id = 0;
 static volatile bool sec_conn = false;
-static bool left = 1;
 
 static uint8_t service_id[] = {
 	0xfb, 0x34, 0x9b, 0x5f,
@@ -77,6 +83,8 @@ static esp_ble_adv_params_t advert_config = {
 };
 
 // adc
+adc_continuous_handle_t adc = NULL;
+
 static adc_channel_t channels[] = {
 	ADC_CHANNEL_0,
 	ADC_CHANNEL_1,
@@ -86,6 +94,50 @@ static adc_channel_t channels[] = {
 	ADC_CHANNEL_5,
 };
 
+const Key qwerty[] = {
+	{ '0',  HID_KEY_0,                },
+	{ 'p',  HID_KEY_P,                },
+	{ ';',  HID_KEY_SEMI_COLON,       },
+	{ '/',  HID_KEY_FWD_SLASH,        },
+	{ '9',  HID_KEY_9,                },
+	{ 'o',  HID_KEY_O,                },
+	{ 'l',  HID_KEY_L,                },
+	{ '.',  HID_KEY_DOT,              },
+	{ '8',  HID_KEY_8,                },
+	{ 'i',  HID_KEY_I,                },
+	{ 'k',  HID_KEY_K,                },
+	{ ',',  HID_KEY_COMMA,            },
+	{ '7',  HID_KEY_7,                },
+	{ 'u',  HID_KEY_U,                },
+	{ 'j',  HID_KEY_J,                },
+	{ 'm',  HID_KEY_M,                },
+	{ '6',  HID_KEY_6,                },
+	{ 'y',  HID_KEY_Y,                },
+	{ 'h',  HID_KEY_H,                },
+	{ 'n',  HID_KEY_N,                },
+	{ '5',  HID_KEY_5,                },
+	{ 't',  HID_KEY_T,                },
+	{ 'g',  HID_KEY_G,                },
+	{ 'b',  HID_KEY_B,                },
+	{ '4',  HID_KEY_4,                },
+	{ 'r',  HID_KEY_R,                },
+	{ 'f',  HID_KEY_F,                },
+	{ 'v',  HID_KEY_V,                },
+	{ '3',  HID_KEY_3,                },
+	{ 'e',  HID_KEY_E,                },
+	{ 'd',  HID_KEY_D,                },
+	{ 'c',  HID_KEY_C,                },
+	{ '2',  HID_KEY_2,                },
+	{ 'w',  HID_KEY_W,                },
+	{ 's',  HID_KEY_S,                },
+	{ 'x',  HID_KEY_X,                },
+	{ '1',  HID_KEY_1,                },
+	{ 'q',  HID_KEY_Q,                },
+	{ 'a',  HID_KEY_A,                },
+	{ 'z',  HID_KEY_Z,                },
+	{ '`',  HID_KEY_GRV_ACCENT,       },
+	{ '\t', HID_KEY_TAB,              },
+};
 
 static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
 	switch (event) {
@@ -167,6 +219,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 		} else {
 			esp_ble_gatts_start_service(param->add_attr_tab.handles[0]);
 		}
+		break;
 	case ESP_GATTS_READ_EVT:
 		ESP_LOGI(TAG, "ESP_GATTS_READ_EVT");
 		break;
@@ -260,65 +313,12 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 	}
 }
 
-adc_continuous_handle_t adc = NULL;
-
-typedef struct {
-	int ch;
-	uint8_t hid;
-} Key;
-
-const Key qwerty[] = {
-	{ '0',  HID_KEY_0,                },
-	{ 'p',  HID_KEY_P,                },
-	{ ';',  HID_KEY_SEMI_COLON,       },
-	{ '/',  HID_KEY_FWD_SLASH,        },
-	{ '9',  HID_KEY_9,                },
-	{ 'o',  HID_KEY_O,                },
-	{ 'l',  HID_KEY_L,                },
-	{ '.',  HID_KEY_DOT,              },
-	{ '8',  HID_KEY_8,                },
-	{ 'i',  HID_KEY_I,                },
-	{ 'k',  HID_KEY_K,                },
-	{ ',',  HID_KEY_COMMA,            },
-	{ '7',  HID_KEY_7,                },
-	{ 'u',  HID_KEY_U,                },
-	{ 'j',  HID_KEY_J,                },
-	{ 'm',  HID_KEY_M,                },
-	{ '6',  HID_KEY_6,                },
-	{ 'y',  HID_KEY_Y,                },
-	{ 'h',  HID_KEY_H,                },
-	{ 'n',  HID_KEY_N,                },
-	{ '5',  HID_KEY_5,                },
-	{ 't',  HID_KEY_T,                },
-	{ 'g',  HID_KEY_G,                },
-	{ 'b',  HID_KEY_B,                },
-	{ '4',  HID_KEY_4,                },
-	{ 'r',  HID_KEY_R,                },
-	{ 'f',  HID_KEY_F,                },
-	{ 'v',  HID_KEY_V,                },
-	{ '3',  HID_KEY_3,                },
-	{ 'e',  HID_KEY_E,                },
-	{ 'd',  HID_KEY_D,                },
-	{ 'c',  HID_KEY_C,                },
-	{ '2',  HID_KEY_2,                },
-	{ 'w',  HID_KEY_W,                },
-	{ 's',  HID_KEY_S,                },
-	{ 'x',  HID_KEY_X,                },
-	{ '1',  HID_KEY_1,                },
-	{ 'q',  HID_KEY_Q,                },
-	{ 'a',  HID_KEY_A,                },
-	{ 'z',  HID_KEY_Z,                },
-	{ '`',  HID_KEY_GRV_ACCENT,       },
-	{ '\t', HID_KEY_TAB,              },
-};
-
-void listen_adc(void *pvParameters)
-{
+void listen_adc(void *pvParameters) {
 	int i, j;
-	int n, m;
+	int n;
 	uint8_t buf[LENGTH(channels)*SOC_ADC_DIGI_RESULT_BYTES*32];
 	uint16_t min[8], max[8];
-	Key *key;
+	const Key *key;
 	adc_digi_output_data_t *bp;
 	esp_err_t ret;
 
@@ -525,20 +525,14 @@ void draw(void *pvParameters)
 
 void bluetooth_send(void *pvParameters)
 {
-	int i, j;
 	Key *key;
 	esp_err_t ret;
 
-	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(10))) {
+	for (;; vTaskDelay(pdMS_TO_TICKS(10))) {
 		xQueueReceive(KeyboardQueue, &key, ~0);
 		if (!sec_conn) {
 			continue;
 		}
-		/*
-		} else if (esp_hidd_send_mouse_value(hid_conn_id, 0, (int8_t)-m, (int8_t)n)) {
-			ESP_LOGE(TAG, "failed to send mouse value");
-		}
-		*/
 
 		if ((ret = esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 1))) {
 			sec_conn = false;
@@ -549,7 +543,6 @@ void bluetooth_send(void *pvParameters)
 		if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 0)) {
 			sec_conn = false;
 			ESP_LOGI(TAG, "failed down");
-			j = 0;
 			continue;
 		}
 	}
@@ -558,7 +551,6 @@ void bluetooth_send(void *pvParameters)
 void app_main(void)
 {
 	esp_err_t ret;
-	int i;
 	uint8_t key_size, init_key, rsp_key;
 
 	DisplayQueue = xQueueCreate(1, sizeof(uint16_t)*6);
