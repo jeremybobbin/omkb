@@ -317,9 +317,21 @@ void listen_adc(void *pvParameters)
 	int i, j;
 	int n, m;
 	uint8_t buf[LENGTH(channels)*SOC_ADC_DIGI_RESULT_BYTES*32];
+	uint16_t min[8], max[8];
 	Key *key;
 	adc_digi_output_data_t *bp;
 	esp_err_t ret;
+
+	uint16_t items[8], prev[8][8], sent[8];
+	for (i = 0; i < 8; i++) {
+		for (j = 0; j < LENGTH(prev); j++) {
+			prev[j][i] = ~0;
+		}
+		items[i] = 0;
+		max[i] = 0;
+		min[i] = ~0;
+		sent[i] = ~0;
+	}
 
 	adc_continuous_handle_cfg_t adc_config = {
 		.max_store_buf_size = sizeof(buf)*4,
@@ -352,7 +364,6 @@ void listen_adc(void *pvParameters)
 		return;
 	}
 
-	uint16_t item[6];
 	uint64_t conv[LENGTH(channels)];
 	for (j = 0;; j++) {
 		if (adc_continuous_start(adc) != ESP_OK) {
@@ -368,38 +379,71 @@ void listen_adc(void *pvParameters)
 		adc_continuous_stop(adc);
 
 		memset(conv, 0, sizeof(conv));
-		memset(item, 0, sizeof(item));
+		memset(items, 0, sizeof(items));
 		for (i = 0; i < n; i += SOC_ADC_DIGI_RESULT_BYTES) {
 			bp = (void*) &buf[i];
 			conv[bp->type2.channel] += bp->type2.data;
-			item[bp->type2.channel]++;
+			items[bp->type2.channel]++;
 		}
 
 		for (i = 0; i < LENGTH(channels); i++) {
-			item[i] = conv[i]/item[i];
+			items[i] = conv[i]/items[i];
 		}
 
-		xQueueSend(DisplayQueue, item, ~0);
+		xQueueSend(DisplayQueue, &items[0], ~0);
 
-		if (j%20) {
-			continue;
-		}
-
-		for (i = 0; i < LENGTH(channels); i++) {
-			//ESP_LOGI(TAG, "i: %d, channel: %d, data: %d", i, buf[i].type2.channel, n);
-
-			n = item[i];
-
-			if (n < 2150 || n > 3000) {
-				str[i] = ' ';
+		for (i = 0; i < 6; i++) {
+			if (items[i] < min[i]) {
+				min[i] = items[i];
+			}
+			if (items[i] > max[i]) {
+				max[i] = items[i];
+			}
+			if (min[i] >= max[i]) {
 				continue;
 			}
-			n = (n-2150)/75;
-			n = MIN(n, 4);
-			key = &qwerty[(i*4)+n+(left?24:0)];
-			//ESP_LOGI(TAG, "sending event: %c\n", key->ch);
 
-			//xQueueSend(KeyboardQueue, &key, ~0);
+			n = items[i]-min[i];
+			switch (i) {
+			case 0: case 1: case 2: case 3:
+				items[i] = MIN(6-1, (sqrt(n)*sqrt(max[i]-min[i])*(6))/(max[i]-min[i]));
+				break;
+			case 4: case 5:
+				items[i] = MIN((H)-1, (n*(H))/(max[i]-min[i]));
+				break;
+			}
+		}
+
+		for (i = 0; i < 4; i++) {
+			n = items[i];
+			/*
+			ESP_LOGI(TAG, "maybe sending event: %d\n", n);
+
+			*/
+			if (n < 2) {
+				sent[i] = ~0;
+				continue;
+			}
+			n = MIN(n-2, 4);
+			int match = 1, k = 0;
+			for (k = 0; k < LENGTH(prev); k++) {
+				if (prev[k][i] != n) {
+					match = 0;
+				}
+			}
+			prev[j%LENGTH(prev)][i] = n;
+			if (!match)  {
+				continue;
+			}
+			if (sent[i] == n) {
+				sent[i] = ~0;
+				continue;
+			}
+			memset(prev, ~0, sizeof(prev));
+			key = &qwerty[(i*4)+n+(left?24:0)];
+			ESP_LOGI(TAG, "sending event: %c %d\n", key->ch, n);
+
+			xQueueSend(KeyboardQueue, &key, ~0);
 		}
 	}
 	adc_continuous_stop(adc);
@@ -481,37 +525,25 @@ void draw(void *pvParameters)
 
 void bluetooth_send(void *pvParameters)
 {
-	int i, j, n, m;
+	int i, j;
 	Key *key;
-	uint8_t c;
+	esp_err_t ret;
 
 	for (j = 0;; j++, vTaskDelay(pdMS_TO_TICKS(10))) {
 		xQueueReceive(KeyboardQueue, &key, ~0);
+		if (!sec_conn) {
+			continue;
+		}
 		/*
-		n = item[4];
-		m = item[5];
-		if (n >= 1900 && n <= 2100) {
-			n = 0;
-		} else {
-			n = (n-2000)/32;
-		}
-
-		if (m >= 1900 && m <= 2100) {
-			m = 0;
-		} else {
-			m = (m-2000)/32;
-		}
-
-		if (n == 0 && m == 0) {
-			// ok
 		} else if (esp_hidd_send_mouse_value(hid_conn_id, 0, (int8_t)-m, (int8_t)n)) {
 			ESP_LOGE(TAG, "failed to send mouse value");
 		}
 		*/
 
-		if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 1)) {
-			//sec_conn = false;
-			ESP_LOGI(TAG, "failed sending key");
+		if ((ret = esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 1))) {
+			sec_conn = false;
+			ESP_LOGI(TAG, "failed sending key %c - %d", key->ch, ret);
+			continue;
 		}
 
 		if (esp_hidd_send_keyboard_value(hid_conn_id, 0, &key->hid, 0)) {
@@ -520,11 +552,6 @@ void bluetooth_send(void *pvParameters)
 			j = 0;
 			continue;
 		}
-
-		if (j%20) {
-			continue;
-		}
-
 	}
 }
 
@@ -679,5 +706,5 @@ void app_main(void)
 
 	xTaskCreate(&listen_adc, "listen_adc", 2048<<1, NULL, 5, NULL);
 	xTaskCreate(&draw, "draw", 2048<<1, NULL, 5, NULL);
-	//xTaskCreate(&bluetooth_send, "bluetooth_send", 2048<<1, NULL, 5, NULL);
+	xTaskCreate(&bluetooth_send, "bluetooth_send", 2048<<1, NULL, 5, NULL);
 }
